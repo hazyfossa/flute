@@ -3,7 +3,7 @@ use std::{error::Error, marker::PhantomData};
 use serde::{Serialize, de::DeserializeOwned};
 use snafu::Snafu;
 
-// TODO: named errors for DataFormat and Channel
+// TODO: named errors for DataFormat and Transport
 
 #[derive(Debug, Snafu)]
 #[snafu(transparent)]
@@ -37,32 +37,32 @@ pub trait Codec {
     fn decode(&mut self, data: Self::Out) -> Result<Self::In, CodecError<Self>>;
 }
 
-pub struct WithCodec<Ch, Co> {
-    channel: Ch,
+pub struct WithCodec<T, Co> {
+    transport: T,
     codec: Co,
 }
 
-impl<Ch, Co, In, Out> Channel for WithCodec<Ch, Co>
+impl<T, Co, In, Out> Transport for WithCodec<T, Co>
 where
-    Ch: Channel<Wire = Out>,
+    T: Transport<Wire = Out>,
     Co: Codec<In = In, Out = Out>,
 {
     type Wire = In;
 
-    async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
-        let data = self.channel.recv().await?;
+    async fn recv(&mut self) -> Result<Self::Wire, TransportError> {
+        let data = self.transport.recv().await?;
         Ok(self.codec.decode(data)?)
     }
 
-    async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
+    async fn send(&mut self, data: Self::Wire) -> Result<(), TransportError> {
         let data = self.codec.encode(data)?;
-        Ok(self.channel.send(data).await?)
+        Ok(self.transport.send(data).await?)
     }
 }
 
-impl<C: Codec> From<CodecError<C>> for ChannelError {
+impl<C: Codec> From<CodecError<C>> for TransportError {
     fn from(value: CodecError<C>) -> Self {
-        Self::Transport {
+        TransportError::Other {
             message: value.to_string(),
             source: Some(value.source),
         }
@@ -70,11 +70,11 @@ impl<C: Codec> From<CodecError<C>> for ChannelError {
 }
 
 #[derive(Debug, Snafu)]
-pub enum ChannelError {
-    #[snafu(display("channel closed"))]
+pub enum TransportError {
+    #[snafu(display("transport closed"))]
     Closed,
     #[snafu(whatever)]
-    Transport {
+    Other {
         message: String,
         #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
         source: Option<Box<dyn std::error::Error>>,
@@ -82,18 +82,18 @@ pub enum ChannelError {
 }
 
 #[allow(async_fn_in_trait)]
-pub trait Channel {
+pub trait Transport {
     type Wire;
 
-    async fn recv(&mut self) -> Result<Self::Wire, ChannelError>;
-    async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError>;
+    async fn recv(&mut self) -> Result<Self::Wire, TransportError>;
+    async fn send(&mut self, data: Self::Wire) -> Result<(), TransportError>;
 
     fn with_codec<C: Codec>(self, codec: C) -> WithCodec<Self, C>
     where
         Self: Sized,
     {
         WithCodec {
-            channel: self,
+            transport: self,
             codec,
         }
     }
