@@ -4,5 +4,9 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+futures-util = { version = "0.3.31", optional = true, default-features = false, features = ["sink"] }
 serde = { version = "1.0.228", features = ["derive"] }
 snafu = "0.8.9"
+
+[features]
+futures = [ "dep:futures-util"]
