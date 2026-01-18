@@ -1,3 +1,4 @@
 pub mod rpc;
-pub mod traits;
-pub use traits::*;
+
+pub mod core;
+pub use core::*;

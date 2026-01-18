@@ -1,7 +1,8 @@
-use super::traits::*;
-use eyre::Result;
+use std::error::Error;
+
+use super::core::*;
 use serde::{Serialize, de::DeserializeOwned};
-use thiserror::Error;
+use snafu::Snafu;
 
 #[macro_export]
 macro_rules! define_rpc {
@@ -20,17 +21,17 @@ macro_rules! define_rpc {
             )*
         }
 
-        impl<T: [<$service Handler>], Wire> flute::rpc::Handler<Wire> for T {
-            async fn handle<C, F>(&mut self, mut rpc: flute::rpc::RPC<C, F>) -> Result<(), flute::rpc::RpcError>
+        impl<T: [<$service Handler>], Wire> $crate::rpc::Handler<Wire> for T {
+            async fn handle<C, F>(&mut self, mut rpc: $crate::rpc::RPC<C, F>) -> Result<(), $crate::rpc::RpcError>
             where
                 C: Channel<Wire = Wire>,
-                F: flute::DataFormat<Repr = Wire>,
+                F: $crate::DataFormat<Repr = Wire>,
                 {
                     loop {
                         match rpc.recv().await? {
                             $([<$service Request>]::$function { $($field),* } => {
                                 let response = self.[<$function:snake>]($($field),*)
-                                    .map_err(|e| flute::rpc::RpcError::HandlerError(e.into()))?;
+                                    .map_err(|e| $crate::rpc::RpcError::HandlerError(e.into()))?;
 
                                 rpc.send(response).await?;
                             }),*
@@ -40,14 +41,14 @@ macro_rules! define_rpc {
         }
 
 
-        pub struct $service<C, F>(flute::rpc::RPC<C, F>);
+        pub struct $service<C, F>($crate::rpc::RPC<C, F>);
 
         impl<Wire, C, F> $service<C, F>
         where
-            C: flute::Channel<Wire = Wire>,
-            F: flute::DataFormat<Repr = Wire>
+            C: $crate::Channel<Wire = Wire>,
+            F: $crate::DataFormat<Repr = Wire>
         {
-            pub fn bind(rpc: flute::rpc::RPC<C, F>) -> Self {
+            pub fn bind(rpc: $crate::rpc::RPC<C, F>) -> Self {
                 Self(rpc)
             }
 
@@ -73,23 +74,16 @@ pub struct RPC<C, F> {
     format: F,
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Snafu)]
 pub enum RpcError {
-    #[error("channel closed")]
-    ChannelClosed,
-    #[error("handler error: {0}")]
-    HandlerError(eyre::Error),
-    #[error(transparent)]
-    Other(#[from] eyre::Error),
-}
+    #[snafu(transparent)]
+    DataFormatError { source: DataFormatError },
 
-impl From<ChannelError> for RpcError {
-    fn from(value: ChannelError) -> Self {
-        match value {
-            ChannelError::Closed => Self::ChannelClosed,
-            ChannelError::Transport(e) => Self::Other(e.wrap_err("channel error")),
-        }
-    }
+    #[snafu(transparent)]
+    ChannelError { source: ChannelError },
+
+    #[snafu(display("handler error"))]
+    HandlerError { source: Box<dyn Error> },
 }
 
 impl<Wire, C: Channel<Wire = Wire>, F: DataFormat<Repr = Wire>> RPC<C, F> {

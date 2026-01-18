@@ -1,28 +1,30 @@
-use eyre::{Result, eyre};
+use std::{error::Error, marker::PhantomData};
+
 use serde::{Serialize, de::DeserializeOwned};
-use thiserror::Error;
+use snafu::Snafu;
+
+// TODO: named errors for DataFormat and Channel
+
+#[derive(Debug, Snafu)]
+#[snafu(transparent)]
+pub struct DataFormatError {
+    source: Box<dyn Error>,
+}
 
 pub trait DataFormat {
+    const NAME: &str;
+
     type Repr;
 
-    fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr>;
-    fn decode<T: DeserializeOwned>(&mut self, data: Self::Repr) -> Result<T>;
+    fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr, DataFormatError>;
+    fn decode<T: DeserializeOwned>(&mut self, data: Self::Repr) -> Result<T, DataFormatError>;
 }
 
-pub struct CodecError<C: Codec + ?Sized>(C::Error);
-
-impl<C: Codec<Error = T> + ?Sized, T: std::error::Error + Send + Sync + 'static> From<T>
-    for CodecError<C>
-{
-    fn from(value: T) -> Self {
-        Self(value)
-    }
-}
-
-impl<C: Codec + ?Sized> From<CodecError<C>> for eyre::Error {
-    fn from(value: CodecError<C>) -> Self {
-        eyre!(value.0).wrap_err(format!("{} codec error", C::NAME))
-    }
+#[derive(Debug, Snafu)]
+#[snafu(display("{} codec error", C::NAME))]
+pub struct CodecError<C: Codec + ?Sized> {
+    _c: PhantomData<C>,
+    source: Box<dyn std::error::Error>,
 }
 
 pub trait Codec {
@@ -30,7 +32,6 @@ pub trait Codec {
 
     type In;
     type Out;
-    type Error: std::error::Error + Send + Sync + 'static;
 
     fn encode(&mut self, data: Self::In) -> Result<Self::Out, CodecError<Self>>;
     fn decode(&mut self, data: Self::Out) -> Result<Self::In, CodecError<Self>>;
@@ -61,16 +62,23 @@ where
 
 impl<C: Codec> From<CodecError<C>> for ChannelError {
     fn from(value: CodecError<C>) -> Self {
-        Self::Transport(value.into())
+        Self::Transport {
+            message: value.to_string(),
+            source: Some(value.source),
+        }
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Snafu)]
 pub enum ChannelError {
-    #[error("channel closed")]
+    #[snafu(display("channel closed"))]
     Closed,
-    #[error(transparent)]
-    Transport(#[from] eyre::Error),
+    #[snafu(whatever)]
+    Transport {
+        message: String,
+        #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
+        source: Option<Box<dyn std::error::Error>>,
+    },
 }
 
 #[allow(async_fn_in_trait)]
