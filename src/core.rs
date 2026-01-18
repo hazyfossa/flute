@@ -87,7 +87,9 @@ pub trait Transport {
 
     async fn recv(&mut self) -> Result<Self::Wire, TransportError>;
     async fn send(&mut self, data: Self::Wire) -> Result<(), TransportError>;
+}
 
+pub trait TransportExt: Transport {
     fn with_codec<C: Codec>(self, codec: C) -> WithCodec<Self, C>
     where
         Self: Sized,
@@ -98,3 +100,5 @@ pub trait Transport {
         }
     }
 }
+
+impl<T: Transport> TransportExt for T {}
