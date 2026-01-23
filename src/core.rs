@@ -1,98 +1,112 @@
-use std::{any::type_name, error::Error, marker::PhantomData};
+pub mod data_format {
+    // TODO: decouple from serde
+    use std::error::Error;
 
-use serde::{Serialize, de::DeserializeOwned};
-use snafu::Snafu;
+    use serde::{Serialize, de::DeserializeOwned};
+    use snafu::Snafu;
 
-#[derive(Debug, Snafu)]
-#[snafu(transparent)]
-pub struct DataFormatError {
-    source: Box<dyn Error>,
-}
-
-pub trait DataFormat {
-    type Repr;
-
-    fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr, DataFormatError>;
-    fn decode<T: DeserializeOwned>(&mut self, data: Self::Repr) -> Result<T, DataFormatError>;
-}
-
-#[derive(Debug, Snafu)]
-#[snafu(display("{} codec error", type_name::<C>()))]
-pub struct CodecError<C: Codec + ?Sized> {
-    _c: PhantomData<C>,
-    source: Box<dyn std::error::Error>,
-}
-
-pub trait Codec {
-    type In;
-    type Out;
-
-    fn encode(&mut self, data: Self::In) -> Result<Self::Out, CodecError<Self>>;
-    fn decode(&mut self, data: Self::Out) -> Result<Self::In, CodecError<Self>>;
-}
-
-pub struct WithCodec<T, Co> {
-    transport: T,
-    codec: Co,
-}
-
-impl<T, Co, In, Out> Transport for WithCodec<T, Co>
-where
-    T: Transport<Wire = Out>,
-    Co: Codec<In = In, Out = Out>,
-{
-    type Wire = In;
-
-    async fn recv(&mut self) -> Result<Self::Wire, TransportError> {
-        let data = self.transport.recv().await?;
-        Ok(self.codec.decode(data)?)
+    #[derive(Debug, Snafu)]
+    #[snafu(transparent)]
+    pub struct DataFormatError {
+        source: Box<dyn Error>,
     }
 
-    async fn send(&mut self, data: Self::Wire) -> Result<(), TransportError> {
-        let data = self.codec.encode(data)?;
-        Ok(self.transport.send(data).await?)
+    pub trait DataFormat {
+        type Repr;
+
+        fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr, DataFormatError>;
+        fn decode<T: DeserializeOwned>(&mut self, data: Self::Repr) -> Result<T, DataFormatError>;
     }
 }
 
-impl<C: Codec> From<CodecError<C>> for TransportError {
-    fn from(value: CodecError<C>) -> Self {
-        TransportError::Other {
-            message: value.to_string(),
-            source: Some(value.source),
-        }
+pub mod transform {
+    use std::{any::type_name, marker::PhantomData};
+
+    use super::channel::{Channel, ChannelError};
+    use snafu::Snafu;
+
+    #[derive(Debug, Snafu)]
+    #[snafu(display("{} transform error", type_name::<T>()))]
+    pub struct TransformError<T: Transform + ?Sized> {
+        _t: PhantomData<T>,
+        source: Box<dyn std::error::Error>,
     }
-}
 
-#[derive(Debug, Snafu)]
-pub enum TransportError {
-    #[snafu(display("transport closed"))]
-    Closed,
-    #[snafu(whatever)]
-    Other {
-        message: String,
-        #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
-        source: Option<Box<dyn std::error::Error>>,
-    },
-}
+    pub trait Transform {
+        type In;
+        type Out;
 
-#[allow(async_fn_in_trait)]
-pub trait Transport {
-    type Wire;
+        fn encode(&mut self, data: Self::In) -> Result<Self::Out, TransformError<Self>>;
+        fn decode(&mut self, data: Self::Out) -> Result<Self::In, TransformError<Self>>;
+    }
 
-    async fn recv(&mut self) -> Result<Self::Wire, TransportError>;
-    async fn send(&mut self, data: Self::Wire) -> Result<(), TransportError>;
-}
+    pub struct Transformed<C, T> {
+        channel: C,
+        transform: T,
+    }
 
-pub trait TransportExt: Transport {
-    fn with_codec<C: Codec>(self, codec: C) -> WithCodec<Self, C>
+    impl<C, T, In, Out> Channel for Transformed<C, T>
     where
-        Self: Sized,
+        C: Channel<Wire = Out>,
+        T: Transform<In = In, Out = Out>,
     {
-        WithCodec {
-            transport: self,
-            codec,
+        type Wire = In;
+
+        async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
+            let data = self.channel.recv().await?;
+            Ok(self.transform.decode(data)?)
+        }
+
+        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
+            let data = self.transform.encode(data)?;
+            Ok(self.channel.send(data).await?)
         }
     }
+
+    impl<T: Transform> From<TransformError<T>> for ChannelError {
+        fn from(value: TransformError<T>) -> Self {
+            ChannelError::Other {
+                message: value.to_string(),
+                source: Some(value.source),
+            }
+        }
+    }
+
+    pub trait ChannelTransformExt: Channel {
+        fn transform<T: Transform>(self, transform: T) -> Transformed<Self, T>
+        where
+            Self: Sized,
+        {
+            Transformed {
+                channel: self,
+                transform,
+            }
+        }
+    }
+
+    impl<T: Channel> ChannelTransformExt for T {}
 }
 
-impl<T: Transport> TransportExt for T {}
+pub mod channel {
+    use snafu::Snafu;
+
+    #[derive(Debug, Snafu)]
+    pub enum ChannelError {
+        #[snafu(display("channel closed"))]
+        Closed,
+        #[snafu(whatever)]
+        Other {
+            message: String,
+            #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
+            source: Option<Box<dyn std::error::Error>>,
+        },
+    }
+
+    #[allow(async_fn_in_trait)]
+    pub trait Channel {
+        type Wire;
+
+        async fn recv(&mut self) -> Result<Self::Wire, ChannelError>;
+        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError>;
+    }
+}

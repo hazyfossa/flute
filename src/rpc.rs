@@ -1,6 +1,7 @@
 use std::error::Error;
 
-use super::core::*;
+use crate::{Channel, ChannelError, DataFormat, DataFormatError};
+
 use serde::{Serialize, de::DeserializeOwned};
 use snafu::Snafu;
 
@@ -68,7 +69,7 @@ macro_rules! define_rpc {
 pub trait Handler<Wire> {
     async fn handle<C, F>(&mut self, rpc: RPC<C, F>) -> Result<()>
     where
-        C: Transport<Wire = Wire>,
+        C: Channel<Wire = Wire>,
         F: DataFormat<Repr = Wire>;
 }
 
@@ -83,7 +84,7 @@ pub enum RpcError {
     DataFormatError { source: DataFormatError },
 
     #[snafu(transparent)]
-    TransportError { source: TransportError },
+    TransportError { source: ChannelError },
 
     #[snafu(display("handler error"))]
     HandlerError { source: Box<dyn Error> },
@@ -91,7 +92,7 @@ pub enum RpcError {
 
 pub type Result<T, E = RpcError> = std::result::Result<T, E>;
 
-impl<Wire, T: Transport<Wire = Wire>, F: DataFormat<Repr = Wire>> RPC<T, F> {
+impl<Wire, T: Channel<Wire = Wire>, F: DataFormat<Repr = Wire>> RPC<T, F> {
     pub fn new(transport: T, format: F) -> Self {
         Self { transport, format }
     }
