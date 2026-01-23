@@ -1,9 +1,7 @@
-use std::{error::Error, marker::PhantomData};
+use std::{any::type_name, error::Error, marker::PhantomData};
 
 use serde::{Serialize, de::DeserializeOwned};
 use snafu::Snafu;
-
-// TODO: named errors for DataFormat and Transport
 
 #[derive(Debug, Snafu)]
 #[snafu(transparent)]
@@ -12,8 +10,6 @@ pub struct DataFormatError {
 }
 
 pub trait DataFormat {
-    const NAME: &str;
-
     type Repr;
 
     fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr, DataFormatError>;
@@ -21,15 +17,13 @@ pub trait DataFormat {
 }
 
 #[derive(Debug, Snafu)]
-#[snafu(display("{} codec error", C::NAME))]
+#[snafu(display("{} codec error", type_name::<C>()))]
 pub struct CodecError<C: Codec + ?Sized> {
     _c: PhantomData<C>,
     source: Box<dyn std::error::Error>,
 }
 
 pub trait Codec {
-    const NAME: &str;
-
     type In;
     type Out;
 
