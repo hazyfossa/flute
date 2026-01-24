@@ -14,6 +14,8 @@ V2:
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing
+- [ ] Primitive Multipath
+- [ ] Channel priorities
 
 # Non-goals
 - Defining our own transport

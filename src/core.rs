@@ -14,8 +14,8 @@ pub mod data_format {
     pub trait DataFormat {
         type Repr;
 
-        fn encode<T: Serialize>(&mut self, value: T) -> Result<Self::Repr, DataFormatError>;
-        fn decode<T: DeserializeOwned>(&mut self, data: Self::Repr) -> Result<T, DataFormatError>;
+        fn encode<T: Serialize>(value: T) -> Result<Self::Repr, DataFormatError>;
+        fn decode<T: DeserializeOwned>(data: Self::Repr) -> Result<T, DataFormatError>;
     }
 }
 
