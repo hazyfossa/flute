@@ -2,66 +2,58 @@
 mod futures {
     use futures_util::{SinkExt as Sink, StreamExt as Stream};
 
-    use crate::channel::*;
+    use crate::primitives::*;
 
-    impl<Wire, T: Stream<Item = Wire> + Sink<Wire> + Unpin> Channel for T
+    impl<Wire, T: Sink<Wire> + Unpin> Tx<Wire> for (T,)
     where
-        ChannelError: From<T::Error>,
+        Error: From<T::Error>,
     {
-        type Wire = Wire;
-
-        async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
-            match self.next().await {
-                Some(data) => Ok(data),
-                None => Err(ChannelError::Closed),
-            }
+        async fn send(&mut self, data: Wire) -> Result<(), Error> {
+            Ok(self.0.send(data).await?)
         }
+    }
 
-        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
-            Ok(self.send(data).await?)
+    impl<T: Stream + Unpin> Rx<T::Item> for (T,) {
+        async fn recv(&mut self) -> Result<T::Item, Error> {
+            match self.0.next().await {
+                Some(data) => Ok(data),
+                None => Err(Error::Closed),
+            }
         }
     }
 }
 
 #[cfg(feature = "kanal")]
 pub mod kanal {
-    use crate::channel::*;
     use kanal::{AsyncReceiver, AsyncSender};
 
-    pub struct KanalChannel<T> {
-        tx: AsyncSender<T>,
-        rx: AsyncReceiver<T>,
-    }
+    use crate::{
+        merge::{Merged, merge},
+        primitives::*,
+    };
 
-    impl<T> Channel for KanalChannel<T> {
-        type Wire = T;
-        async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
-            self.rx.recv().await.map_err(|_| ChannelError::Closed)
-        }
-
-        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
-            self.tx.send(data).await.map_err(|_| ChannelError::Closed)
+    impl<T> Tx<T> for AsyncSender<T> {
+        async fn send(&mut self, data: T) -> Result<(), Error> {
+            AsyncSender::send(self, data)
+                .await
+                .map_err(|_| Error::Closed)
         }
     }
 
-    pub fn pair<T>(size: usize) -> (KanalChannel<T>, KanalChannel<T>) {
-        let (a_tx, a_rx) = kanal::bounded_async(size);
-        let (b_tx, b_rx) = kanal::bounded_async(size);
-
-        let a = KanalChannel { tx: a_tx, rx: b_rx };
-        let b = KanalChannel { tx: b_tx, rx: a_rx };
-
-        (a, b)
+    impl<T> Rx<T> for AsyncReceiver<T> {
+        async fn recv(&mut self) -> Result<T, Error> {
+            AsyncReceiver::recv(self).await.map_err(|_| Error::Closed)
+        }
     }
 
-    pub fn pair_unbounded<T>() -> (KanalChannel<T>, KanalChannel<T>) {
-        let (a_tx, a_rx) = kanal::unbounded_async();
-        let (b_tx, b_rx) = kanal::unbounded_async();
+    type KanalChannel<T> = Merged<AsyncSender<T>, AsyncReceiver<T>>;
 
-        let a = KanalChannel { tx: a_tx, rx: b_rx };
-        let b = KanalChannel { tx: b_tx, rx: a_rx };
+    pub fn unbounded<T>() -> KanalChannel<T> {
+        merge(kanal::unbounded_async())
+    }
 
-        (a, b)
+    pub fn bounded<T>(size: usize) -> KanalChannel<T> {
+        merge(kanal::bounded_async(size))
     }
 }
 

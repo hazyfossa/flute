@@ -5,10 +5,9 @@ Flute is a utility crate for defining RPC interfaces. It is non-opinionated, foc
 # todo
 - [ ] Documentation
 - [ ] Examples
-- [ ] Better error handling
+- [x] Better error handling (snafu)
 - [ ] Tracing integration
 - [x] Futures Stream+Sink compat
-- [ ] Tokio framed stream compat
 
 V2:
 - [ ] Batching

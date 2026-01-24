@@ -1,3 +1,126 @@
+pub mod primitives {
+    use snafu::Snafu;
+
+    #[allow(async_fn_in_trait)]
+    pub trait Tx<Wire> {
+        async fn send(&mut self, data: Wire) -> Result<(), Error>;
+    }
+
+    #[allow(async_fn_in_trait)]
+    pub trait Rx<Wire> {
+        async fn recv(&mut self) -> Result<Wire, Error>;
+    }
+
+    // TODO: consider making Wire an associated type
+    // pros: more concise code (at some places)
+    // cons:
+    // cannot make a channel what accepts different wire types
+    // PhantomData<Wire> (at some places)
+    pub trait Channel<Wire>: Tx<Wire> + Rx<Wire> {}
+    impl<Wire, T: Tx<Wire> + Rx<Wire>> Channel<Wire> for T {}
+
+    // TODO: better name, or never do primitives::*
+    #[derive(Debug, Snafu)]
+    pub enum Error {
+        #[snafu(display("channel closed"))]
+        Closed,
+        #[snafu(whatever)]
+        Other {
+            message: String,
+            #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
+            source: Option<Box<dyn std::error::Error>>,
+        },
+    }
+}
+
+pub mod merge {
+    use crate::primitives::*;
+
+    pub struct Merged<Tx, Rx> {
+        pub tx: Tx,
+        pub rx: Rx,
+    }
+
+    impl<Wire, A: Tx<Wire>, B> Tx<Wire> for Merged<A, B> {
+        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
+            self.tx.send(data)
+        }
+    }
+
+    impl<Wire, A, B: Rx<Wire>> Rx<Wire> for Merged<A, B> {
+        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
+            self.rx.recv()
+        }
+    }
+
+    pub fn merge_remap<Wire, A, B>(tx: A, rx: B) -> Merged<A, B>
+    where
+        A: Tx<Wire>,
+        B: Rx<Wire>,
+    {
+        Merged { tx, rx }
+    }
+
+    pub fn merge<Wire, A, B>(s: (A, B)) -> Merged<A, B>
+    where
+        A: Tx<Wire>,
+        B: Rx<Wire>,
+    {
+        merge_remap(s.0, s.1)
+    }
+}
+
+pub mod split {
+    use crate::primitives::*;
+
+    pub trait Split<Wire>: Channel<Wire> {
+        type Tx: Tx<Wire>;
+        type Rx: Rx<Wire>;
+        fn split(self) -> (Self::Tx, Self::Rx);
+    }
+
+    impl<Wire, A, B> Split<Wire> for super::merge::Merged<A, B>
+    where
+        A: Tx<Wire>,
+        B: Rx<Wire>,
+    {
+        type Tx = A;
+        type Rx = B;
+
+        fn split(self) -> (Self::Tx, Self::Rx) {
+            (self.tx, self.rx)
+        }
+    }
+}
+
+pub mod downcast {
+    use crate::primitives::*;
+
+    pub struct DowncastTx<C>(C);
+    impl<Wire, C: Channel<Wire>> Tx<Wire> for DowncastTx<C> {
+        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
+            self.0.send(data)
+        }
+    }
+
+    pub struct DowncastRx<C>(C);
+    impl<Wire, C: Channel<Wire>> Rx<Wire> for DowncastRx<C> {
+        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
+            self.0.recv()
+        }
+    }
+
+    pub trait ChannelDowncast<Wire>: Sized + Channel<Wire> {
+        fn downcast_tx(self) -> impl Tx<Wire> {
+            DowncastTx(self)
+        }
+
+        fn downcast_rx(self) -> impl Rx<Wire> {
+            DowncastRx(self)
+        }
+    }
+}
+
 pub mod data_format {
     // TODO: decouple from serde
     use std::error::Error;
@@ -19,56 +142,18 @@ pub mod data_format {
     }
 }
 
-pub mod channel {
-    use snafu::Snafu;
-
-    use crate::{
-        data_format::DataFormat,
-        flow::{DirectFlow, Flow},
-    };
-
-    #[derive(Debug, Snafu)]
-    pub enum ChannelError {
-        #[snafu(display("channel closed"))]
-        Closed,
-        #[snafu(whatever)]
-        Other {
-            message: String,
-            #[snafu(source(from(Box<dyn std::error::Error>, Some)))]
-            source: Option<Box<dyn std::error::Error>>,
-        },
-    }
-
-    #[allow(async_fn_in_trait)]
-    pub trait Channel {
-        type Wire;
-
-        async fn recv(&mut self) -> Result<Self::Wire, ChannelError>;
-        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError>;
-
-        // TODO: consider making this an extension
-        fn with_data_format<F>(self) -> impl Flow
-        where
-            Self: Sized,
-            F: DataFormat<Repr = Self::Wire>,
-        {
-            DirectFlow::<Self, F>::new(self)
-        }
-    }
-}
-
 pub mod flow {
     use std::marker::PhantomData;
 
     use serde::{Serialize, de::DeserializeOwned};
     use snafu::Snafu;
 
-    use crate::{channel::*, data_format::*};
+    use crate::{data_format::*, primitives::*};
 
     #[derive(Debug, Snafu)]
     pub enum FlowError {
         #[snafu(transparent)]
-        ChannelError { source: ChannelError },
+        ChannelError { source: Error },
         #[snafu(transparent)]
         DataFormatError { source: DataFormatError },
     }
@@ -94,7 +179,7 @@ pub mod flow {
         }
     }
 
-    impl<Wire, C: Channel<Wire = Wire>, F: DataFormat<Repr = Wire>> Flow for DirectFlow<C, F> {
+    impl<Wire, C: Channel<Wire>, F: DataFormat<Repr = Wire>> Flow for DirectFlow<C, F> {
         type Format = F;
 
         async fn recv<V: DeserializeOwned + 'static>(&mut self) -> Result<V, FlowError> {
@@ -107,12 +192,25 @@ pub mod flow {
             Ok(self.channel.send(data).await?)
         }
     }
+
+    pub trait UseFlow<Wire>: Channel<Wire> {
+        fn with_data_format<F>(self) -> impl Flow
+        where
+            Self: Sized,
+            F: DataFormat<Repr = Wire>,
+        {
+            DirectFlow::<Self, F>::new(self)
+        }
+    }
+
+    impl<Wire, T: Channel<Wire>> UseFlow<Wire> for T {}
 }
 
+// TODO: allow transform on tx/rx (not only channel)
 pub mod transform {
     use std::{any::type_name, marker::PhantomData};
 
-    use super::channel::{Channel, ChannelError};
+    use crate::primitives::*;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -135,34 +233,38 @@ pub mod transform {
         transform: T,
     }
 
-    impl<C, T, In, Out> Channel for Transformed<C, T>
+    impl<Wire, C, T> Tx<T::In> for Transformed<C, T>
     where
-        C: Channel<Wire = Out>,
-        T: Transform<In = In, Out = Out>,
+        C: Channel<Wire>,
+        T: Transform<Out = Wire>,
     {
-        type Wire = In;
-
-        async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
-            let data = self.channel.recv().await?;
-            Ok(self.transform.decode(data)?)
-        }
-
-        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
+        async fn send(&mut self, data: T::In) -> Result<(), Error> {
             let data = self.transform.encode(data)?;
             Ok(self.channel.send(data).await?)
         }
     }
 
-    impl<T: Transform> From<TransformError<T>> for ChannelError {
+    impl<Wire, C, T> Rx<T::In> for Transformed<C, T>
+    where
+        C: Channel<Wire>,
+        T: Transform<Out = Wire>,
+    {
+        async fn recv(&mut self) -> Result<T::In, Error> {
+            let data = self.channel.recv().await?;
+            Ok(self.transform.decode(data)?)
+        }
+    }
+
+    impl<T: Transform> From<TransformError<T>> for Error {
         fn from(value: TransformError<T>) -> Self {
-            ChannelError::Other {
+            Error::Other {
                 message: value.to_string(),
                 source: Some(value.source),
             }
         }
     }
 
-    pub trait ChannelTransformExt: Channel {
+    pub trait ChannelTransformExt<Wire>: Channel<Wire> {
         fn transform<T: Transform>(self, transform: T) -> Transformed<Self, T>
         where
             Self: Sized,
@@ -174,5 +276,5 @@ pub mod transform {
         }
     }
 
-    impl<T: Channel> ChannelTransformExt for T {}
+    impl<Wire, T: Channel<Wire>> ChannelTransformExt<Wire> for T {}
 }
