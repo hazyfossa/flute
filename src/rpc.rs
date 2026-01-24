@@ -1,9 +1,8 @@
 use std::error::Error;
 
-use crate::{Channel, ChannelError, DataFormat, DataFormatError};
-
-use serde::{Serialize, de::DeserializeOwned};
 use snafu::Snafu;
+
+use crate::flow::{Flow, FlowError};
 
 #[macro_export]
 macro_rules! define_rpc {
@@ -24,7 +23,7 @@ macro_rules! define_rpc {
         }
 
         impl<T: [<$service Handler>], Wire> $crate::rpc::Handler<Wire> for T {
-            async fn handle<C, F>(&mut self, mut rpc: $crate::rpc::RPC<C, F>) -> $crate::rpc::Result<()>
+            async fn handle<C, F>(&mut self, mut flow: impl $crate::flow::Flow) -> $crate::rpc::Result<()>
             where
                 C: $crate::Transport<Wire = Wire>,
                 F: $crate::DataFormat<Repr = Wire>,
@@ -65,49 +64,16 @@ macro_rules! define_rpc {
     }};
 }
 
-#[allow(async_fn_in_trait)]
-pub trait Handler<Wire> {
-    async fn handle<C, F>(&mut self, rpc: RPC<C, F>) -> Result<()>
-    where
-        C: Channel<Wire = Wire>,
-        F: DataFormat<Repr = Wire>;
-}
-
-pub struct RPC<T, F> {
-    transport: T,
-    format: F,
-}
-
 #[derive(Debug, Snafu)]
-pub enum RpcError {
+pub enum RPCError {
     #[snafu(transparent)]
-    DataFormatError { source: DataFormatError },
-
+    FlowError { source: FlowError },
+    // TODO: in band error handling, remove this
     #[snafu(transparent)]
-    TransportError { source: ChannelError },
-
-    #[snafu(display("handler error"))]
     HandlerError { source: Box<dyn Error> },
 }
 
-pub type Result<T, E = RpcError> = std::result::Result<T, E>;
-
-impl<Wire, T: Channel<Wire = Wire>, F: DataFormat<Repr = Wire>> RPC<T, F> {
-    pub fn new(transport: T, format: F) -> Self {
-        Self { transport, format }
-    }
-
-    pub async fn recv<V: DeserializeOwned>(&mut self) -> Result<V> {
-        let data = self.transport.recv().await?;
-        Ok(self.format.decode(data)?)
-    }
-
-    pub async fn send<V: Serialize>(&mut self, value: V) -> Result<()> {
-        let data = self.format.encode(value)?;
-        Ok(self.transport.send(data).await?)
-    }
-
-    pub async fn serve(self, mut handler: impl Handler<Wire>) -> Result<()> {
-        handler.handle(self).await
-    }
+#[allow(async_fn_in_trait)]
+pub trait Handler<Wire> {
+    async fn serve<C, F>(&mut self, flow: impl Flow) -> Result<(), RPCError>;
 }

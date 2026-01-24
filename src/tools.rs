@@ -3,12 +3,13 @@ pub mod in_memory {
     pub use crate::compat::kanal::*;
 }
 
+// TODO: make use of this in rpc client (need BatchedFlow trait?)
 pub mod batching {
-    use std::marker::PhantomData;
+    use std::any::Any;
 
-    use serde::{Deserialize, Serialize};
+    use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-    use crate::{Channel, DataFormat};
+    use crate::flow::*;
 
     #[derive(Serialize, Deserialize)]
     enum BatchingTag<T> {
@@ -16,33 +17,33 @@ pub mod batching {
         Batch(Vec<T>),
     }
 
-    pub struct WithBatching<C: Channel, F> {
-        _f: PhantomData<F>,
-        inner: C,
-        buf: Vec<C::Wire>,
+    pub struct WithBatching<F: Flow> {
+        flow: F,
+        buf: Vec<Box<dyn Any>>,
     }
 
-    impl<C: Channel, F: DataFormat> Channel for WithBatching<C, F> {
-        type Wire = C::Wire;
+    impl<F: Flow> Flow for WithBatching<F> {
+        type Format = F::Format;
 
-        async fn recv(&mut self) -> Result<Self::Wire, crate::ChannelError> {
-            if let Some(batch_unroll) = self.buf.pop() {
-                return Ok(batch_unroll);
-            };
+        async fn recv<V: DeserializeOwned + 'static>(&mut self) -> Result<V, FlowError> {
+            if let Some(previous_batch_unroll) = self.buf.pop() {
+                return Ok(*previous_batch_unroll.downcast().unwrap());
+            }
 
-            let data = self.inner.recv();
-            let tagged: BatchingTag<T> = self.inner.recv();
+            let tagged: BatchingTag<V> = self.flow.recv().await?;
             match tagged {
                 BatchingTag::Single(data) => Ok(data),
                 BatchingTag::Batch(batch) => {
-                    self.buf.extend(batch);
+                    for x in batch {
+                        self.buf.push(Box::new(x));
+                    }
                     self.recv().await
                 }
             }
         }
 
-        async fn send(&mut self, data: Self::Wire) -> Result<(), crate::ChannelError> {
-            self.inner.send(BatchingTag::Single(data))
+        async fn send<V: Serialize + 'static>(&mut self, value: V) -> Result<(), FlowError> {
+            self.flow.send(BatchingTag::Single(value)).await
         }
     }
 }

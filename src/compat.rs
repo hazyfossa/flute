@@ -2,7 +2,7 @@
 mod futures {
     use futures_util::{SinkExt as Sink, StreamExt as Stream};
 
-    use crate::{Channel, ChannelError};
+    use crate::channel::*;
 
     impl<Wire, T: Stream<Item = Wire> + Sink<Wire> + Unpin> Channel for T
     where
@@ -10,14 +10,14 @@ mod futures {
     {
         type Wire = Wire;
 
-        async fn recv(&mut self) -> Result<Self::Wire, crate::ChannelError> {
+        async fn recv(&mut self) -> Result<Self::Wire, ChannelError> {
             match self.next().await {
                 Some(data) => Ok(data),
                 None => Err(ChannelError::Closed),
             }
         }
 
-        async fn send(&mut self, data: Self::Wire) -> Result<(), crate::ChannelError> {
+        async fn send(&mut self, data: Self::Wire) -> Result<(), ChannelError> {
             Ok(self.send(data).await?)
         }
     }
@@ -25,8 +25,7 @@ mod futures {
 
 #[cfg(feature = "kanal")]
 pub mod kanal {
-    use crate::{Channel, ChannelError};
-
+    use crate::channel::*;
     use kanal::{AsyncReceiver, AsyncSender};
 
     pub struct KanalChannel<T> {
