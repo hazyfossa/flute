@@ -8,7 +8,7 @@ use snafu::Snafu;
 // blocked on proper framing primitives (completion_io, substrate + frame, etc)
 // semi-blocked on BatchTx/Rx
 
-use crate::primitives::*;
+use crate::{Channel, Error};
 
 use data_format::*;
 pub mod data_format {

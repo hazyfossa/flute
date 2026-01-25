@@ -8,12 +8,13 @@ Flute is a utility crate for defining RPC interfaces. It is non-opinionated, foc
 - [x] Better error handling (snafu)
 - [ ] Tracing integration
 - [x] Futures Stream+Sink compat
+- [x] Dynamic channels
 
 V2:
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing
-- [ ] Primitive Multipath
+- [x] Primitive Multipath
 - [ ] Channel priorities
 
 # Non-goals

@@ -1,7 +1,7 @@
 pub mod transform {
     use std::{any::type_name, marker::PhantomData};
 
-    use crate::primitives::*;
+    use crate::*;
     use snafu::Snafu;
 
     #[derive(Debug, Snafu)]
@@ -24,7 +24,7 @@ pub mod transform {
         transform: T,
     }
 
-    impl<Wire, C, T> Tx<T::In> for Transformed<C, T>
+    impl<Wire, C, T> Channel<T::In> for Transformed<C, T>
     where
         C: Channel<Wire>,
         T: Transform<Out = Wire>,
@@ -33,13 +33,7 @@ pub mod transform {
             let data = self.transform.encode(data)?;
             Ok(self.channel.send(data).await?)
         }
-    }
 
-    impl<Wire, C, T> Rx<T::In> for Transformed<C, T>
-    where
-        C: Channel<Wire>,
-        T: Transform<Out = Wire>,
-    {
         async fn recv(&mut self) -> Result<T::In, Error> {
             let data = self.channel.recv().await?;
             Ok(self.transform.decode(data)?)

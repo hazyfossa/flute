@@ -1,20 +1,32 @@
-use crate::primitives::*;
+pub use crate::Error;
+
+pub trait Tx<Wire> {
+    async fn send(&mut self, data: Wire) -> Result<(), Error>;
+}
+
+pub trait BatchTx<Wire> {
+    // TODO: feed API
+    async fn send_batch(&mut self, data: Vec<Wire>) -> Result<(), Error>;
+}
+
+pub trait Rx<Wire> {
+    async fn recv(&mut self) -> Result<Wire, Error>;
+}
 
 pub mod merge {
     use super::*;
+    use crate::Channel;
 
     pub struct Merged<Tx, Rx> {
         pub tx: Tx,
         pub rx: Rx,
     }
 
-    impl<Wire, A: Tx<Wire>, B> Tx<Wire> for Merged<A, B> {
+    impl<Wire, A: Tx<Wire>, B: Rx<Wire>> Channel<Wire> for Merged<A, B> {
         fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
             self.tx.send(data)
         }
-    }
 
-    impl<Wire, A, B: Rx<Wire>> Rx<Wire> for Merged<A, B> {
         fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
             self.rx.recv()
         }
@@ -40,7 +52,7 @@ pub mod merge {
 pub mod split {
     use super::*;
 
-    pub trait Split<Wire>: Channel<Wire> {
+    pub trait Split<Wire> {
         type Tx: Tx<Wire>;
         type Rx: Rx<Wire>;
         fn split(self) -> (Self::Tx, Self::Rx);
@@ -95,7 +107,9 @@ pub mod add {
 }
 
 pub mod cross {
-    use super::{merge::*, split::*, *};
+    use crate::Channel;
+
+    use super::{merge::*, split::*};
 
     #[allow(type_alias_bounds)]
     pub type Crossed<Wire, A: Split<Wire>, B: Split<Wire>> = Merged<A::Tx, B::Rx>;

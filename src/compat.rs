@@ -5,7 +5,7 @@ pub mod futures {
         stream::{SplitSink, SplitStream},
     };
 
-    use crate::{modifiers::split::*, primitives::*};
+    use crate::{Channel, Error, define::*};
 
     pub struct Adapter<T>(pub T);
 
@@ -27,7 +27,22 @@ pub mod futures {
         }
     }
 
-    impl<Wire, T> Split<Wire> for Adapter<T>
+    // TODO: this code could've been a generic wrapper of Tx + Rx => Channel
+    impl<Wire, T> Channel<Wire> for Adapter<T>
+    where
+        T: Stream<Item = Wire> + Sink<Wire> + Unpin,
+        Error: From<T::Error>,
+    {
+        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
+            Rx::recv(self)
+        }
+
+        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
+            Tx::send(self, data)
+        }
+    }
+
+    impl<Wire, T> split::Split<Wire> for Adapter<T>
     where
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
         Error: From<T::Error>,
@@ -46,7 +61,7 @@ pub mod futures {
 pub mod kanal {
     use kanal::{AsyncReceiver, AsyncSender};
 
-    use crate::{modifiers::merge::*, primitives::*};
+    use crate::{Error, define::*};
 
     impl<T> Tx<T> for AsyncSender<T> {
         async fn send(&mut self, data: T) -> Result<(), Error> {
@@ -62,14 +77,14 @@ pub mod kanal {
         }
     }
 
-    pub type KanalChannel<T> = Merged<AsyncSender<T>, AsyncReceiver<T>>;
+    pub type KanalChannel<T> = merge::Merged<AsyncSender<T>, AsyncReceiver<T>>;
 
     pub fn unbounded<T>() -> KanalChannel<T> {
-        merge(kanal::unbounded_async())
+        merge::merge(kanal::unbounded_async())
     }
 
     pub fn bounded<T>(size: usize) -> KanalChannel<T> {
-        merge(kanal::bounded_async(size))
+        merge::merge(kanal::bounded_async(size))
     }
 }
 
