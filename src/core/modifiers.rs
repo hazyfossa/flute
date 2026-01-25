@@ -60,6 +60,40 @@ pub mod split {
     }
 }
 
+pub mod add {
+    use super::{merge::*, split::*};
+
+    pub trait AddReceiver<Wire>: Split<Wire> {
+        fn add_receiver(self) -> (Merged<Self::Tx, Self::Rx>, Self::Rx);
+    }
+
+    impl<Wire, T: Split<Wire>> AddReceiver<Wire> for T
+    where
+        T::Rx: Clone,
+    {
+        fn add_receiver(self) -> (Merged<Self::Tx, Self::Rx>, Self::Rx) {
+            let (tx, rx) = self.split();
+            let new_rx = rx.clone();
+            (merge((tx, rx)), new_rx)
+        }
+    }
+
+    pub trait AddSender<Wire>: Split<Wire> {
+        fn add_sender(self) -> (Merged<Self::Tx, Self::Rx>, Self::Tx);
+    }
+
+    impl<Wire, T: Split<Wire>> AddSender<Wire> for T
+    where
+        T::Tx: Clone,
+    {
+        fn add_sender(self) -> (Merged<Self::Tx, Self::Rx>, Self::Tx) {
+            let (tx, rx) = self.split();
+            let new_tx = tx.clone();
+            (merge((tx, rx)), new_tx)
+        }
+    }
+}
+
 pub mod cross {
     use super::{merge::*, split::*, *};
 
