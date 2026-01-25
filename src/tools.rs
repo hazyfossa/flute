@@ -66,3 +66,65 @@ pub mod batching {
         }
     }
 }
+
+pub mod disperse {
+    use std::marker::PhantomData;
+
+    use crate::primitives::*;
+
+    // TODO: DynChannel
+    struct RoundRobin<T> {
+        values: Vec<T>,
+        current: usize,
+        cnt: u8,
+        switch_threshold: u8,
+    }
+
+    impl<T> RoundRobin<T> {
+        fn new(values: Vec<T>, switch_threshold: u8) -> Self {
+            Self {
+                values,
+                current: 0,
+                cnt: 0,
+                switch_threshold,
+            }
+        }
+
+        fn access(&mut self) -> &mut T {
+            self.cnt += 1;
+
+            if self.cnt >= self.switch_threshold {
+                self.cnt = 0;
+                self.current = (self.current + 1) % self.values.len();
+            }
+
+            &mut self.values[self.current]
+        }
+    }
+
+    pub struct Dispersed<Wire, T> {
+        _wire: PhantomData<Wire>,
+        round_robin: RoundRobin<T>,
+    }
+
+    impl<Wire, T> Dispersed<Wire, T> {
+        pub fn new(channels: Vec<T>, switch_threshold: u8) -> Self {
+            Self {
+                _wire: PhantomData,
+                round_robin: RoundRobin::new(channels, switch_threshold),
+            }
+        }
+    }
+
+    impl<Wire, T: Tx<Wire>> Tx<Wire> for Dispersed<Wire, T> {
+        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
+            self.round_robin.access().send(data)
+        }
+    }
+
+    impl<Wire, T: Rx<Wire>> Rx<Wire> for Dispersed<Wire, T> {
+        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
+            self.round_robin.access().recv()
+        }
+    }
+}
