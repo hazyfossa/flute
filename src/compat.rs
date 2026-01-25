@@ -5,7 +5,7 @@ pub mod futures {
         stream::{SplitSink, SplitStream},
     };
 
-    use crate::{primitives::*, split::Split};
+    use crate::{modifiers::split::*, primitives::*};
 
     pub struct Adapter<T>(pub T);
 
@@ -46,10 +46,7 @@ pub mod futures {
 pub mod kanal {
     use kanal::{AsyncReceiver, AsyncSender};
 
-    use crate::{
-        merge::{Merged, merge},
-        primitives::*,
-    };
+    use crate::{modifiers::merge::*, primitives::*};
 
     impl<T> Tx<T> for AsyncSender<T> {
         async fn send(&mut self, data: T) -> Result<(), Error> {
