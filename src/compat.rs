@@ -1,10 +1,15 @@
 #[cfg(feature = "futures")]
-mod futures {
-    use futures_util::{SinkExt as Sink, StreamExt as Stream};
+pub mod futures {
+    use futures_util::{
+        SinkExt as Sink, StreamExt as Stream,
+        stream::{SplitSink, SplitStream},
+    };
 
-    use crate::primitives::*;
+    use crate::{primitives::*, split::Split};
 
-    impl<Wire, T: Sink<Wire> + Unpin> Tx<Wire> for (T,)
+    pub struct Adapter<T>(pub T);
+
+    impl<Wire, T: Sink<Wire> + Unpin> Tx<Wire> for Adapter<T>
     where
         Error: From<T::Error>,
     {
@@ -13,12 +18,26 @@ mod futures {
         }
     }
 
-    impl<T: Stream + Unpin> Rx<T::Item> for (T,) {
+    impl<T: Stream + Unpin> Rx<T::Item> for Adapter<T> {
         async fn recv(&mut self) -> Result<T::Item, Error> {
             match self.0.next().await {
                 Some(data) => Ok(data),
                 None => Err(Error::Closed),
             }
+        }
+    }
+
+    impl<Wire, T> Split<Wire> for Adapter<T>
+    where
+        T: Stream<Item = Wire> + Sink<Wire> + Unpin,
+        Error: From<T::Error>,
+    {
+        type Rx = Adapter<SplitStream<T>>;
+        type Tx = Adapter<SplitSink<T, Wire>>;
+
+        fn split(self) -> (Self::Tx, Self::Rx) {
+            let (tx, rx) = self.0.split();
+            (Adapter(tx), Adapter(rx))
         }
     }
 }

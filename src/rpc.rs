@@ -25,7 +25,7 @@ macro_rules! define_rpc {
         impl<T: [<$service Handler>], Wire> $crate::rpc::Handler<Wire> for T {
             async fn handle<C, F>(&mut self, mut flow: impl $crate::flow::Flow) -> $crate::rpc::Result<()>
             where
-                C: $crate::Transport<Wire = Wire>,
+                C: $crate::Channel<Wire>,
                 F: $crate::DataFormat<Repr = Wire>,
                 {
                     loop {
@@ -42,20 +42,17 @@ macro_rules! define_rpc {
         }
 
 
-        pub struct $service<C, F>($crate::rpc::RPC<C, F>);
+        pub struct $service<F>(F);
 
-        impl<Wire, C, F> $service<C, F>
-        where
-            C: $crate::Transport<Wire = Wire>,
-            F: $crate::DataFormat<Repr = Wire>
+        impl<F: $crate::Flow> $service<F>
         {
-            pub fn bind(rpc: $crate::rpc::RPC<C, F>) -> Self {
+            pub fn bind(flow: F) -> Self {
                 Self(rpc)
             }
 
             $(pub async fn [<$function:snake>](
                 &mut self, $($field: $field_type),*
-            ) -> Result<$response, $crate::rpc::RPCError> {
+            ) -> Result<$response, $crate::FlowError> {
                 let request = [<$service Request>]::$function { $($field),* };
                 self.0.send(request).await?;
                 Ok(self.0.recv().await?)
