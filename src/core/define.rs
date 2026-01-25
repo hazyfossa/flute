@@ -55,20 +55,12 @@ pub mod merge {
         }
     }
 
-    pub fn merge_remap<Wire, A, B>(tx: A, rx: B) -> Merged<A, B>
-    where
-        A: Tx<Wire>,
-        B: Rx<Wire>,
-    {
-        Merged { tx, rx }
-    }
-
     pub fn merge<Wire, A, B>(s: (A, B)) -> Merged<A, B>
     where
         A: Tx<Wire>,
         B: Rx<Wire>,
     {
-        merge_remap(s.0, s.1)
+        Merged { tx: s.0, rx: s.1 }
     }
 }
 
@@ -88,6 +80,6 @@ pub mod cross {
         let (a_tx, a_rx) = a.split();
         let (b_tx, b_rx) = b.split();
 
-        (merge_remap(a_tx, b_rx), merge_remap(b_tx, a_rx))
+        (merge((a_tx, b_rx)), merge((b_tx, a_rx)))
     }
 }

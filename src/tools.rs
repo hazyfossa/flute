@@ -67,58 +67,77 @@ pub mod batching {
     }
 }
 
-// #[cfg(feature = "dyn")]
-// pub mod disperse {
-//     use crate::*;
+#[cfg(feature = "dyn")]
+pub mod disperse {
+    use crate::*;
 
-//     struct RoundRobin<T> {
-//         values: Vec<T>,
-//         current: usize,
-//         cnt: u8,
-//         switch_threshold: u8,
-//     }
+    struct RoundRobin<T> {
+        values: Vec<T>,
+        current: usize,
+        cnt: u8,
+        switch_threshold: u8,
+    }
 
-//     impl<T> RoundRobin<T> {
-//         fn new(values: Vec<T>, switch_threshold: u8) -> Self {
-//             Self {
-//                 values,
-//                 current: 0,
-//                 cnt: 0,
-//                 switch_threshold,
-//             }
-//         }
+    impl<T> RoundRobin<T> {
+        fn new(values: Vec<T>, switch_threshold: u8) -> Self {
+            Self {
+                values,
+                current: 0,
+                cnt: 0,
+                switch_threshold,
+            }
+        }
 
-//         fn access(&mut self) -> &mut T {
-//             self.cnt += 1;
+        fn access(&mut self) -> &mut T {
+            self.cnt += 1;
 
-//             if self.cnt >= self.switch_threshold {
-//                 self.cnt = 0;
-//                 self.current = (self.current + 1) % self.values.len();
-//             }
+            if self.cnt >= self.switch_threshold {
+                self.cnt = 0;
+                self.current = (self.current + 1) % self.values.len();
+            }
 
-//             &mut self.values[self.current]
-//         }
-//     }
+            &mut self.values[self.current]
+        }
+    }
 
-//     pub struct Dispersed<'a, T> {
-//         round_robin: RoundRobin<Box<DynChannel<'a, T>>>,
-//     }
+    pub struct Builder<'a, Wire> {
+        inner: Vec<Box<DynChannel<'a, Wire>>>,
+    }
 
-//     impl<'a, Wire> Dispersed<'a, Wire> {
-//         pub fn new(channels: &[&'a DynChannel<Wire>], switch_threshold: u8) -> Self {
-//             Self {
-//                 round_robin: RoundRobin::new(channels, switch_threshold),
-//             }
-//         }
-//     }
+    impl<'a, T> Builder<'a, T> {
+        fn new() -> Self {
+            Self { inner: Vec::new() }
+        }
 
-//     impl<'a, Wire> Channel<Wire> for Dispersed<'a, Wire> {
-//         fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
-//             self.round_robin.access().send(data)
-//         }
+        pub fn add(mut self, channel: impl Channel<T> + 'a) -> Self {
+            self.inner.push(DynChannel::new_box(channel));
+            self
+        }
 
-//         fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
-//             self.round_robin.access().recv()
-//         }
-//     }
-// }
+        pub fn finish(self, switch_threshold: u8) -> Dispersed<'a, T> {
+            Dispersed {
+                round_robin: RoundRobin::new(self.inner, switch_threshold),
+            }
+        }
+    }
+
+    pub struct Dispersed<'a, T> {
+        round_robin: RoundRobin<Box<DynChannel<'a, T>>>,
+    }
+
+    impl<'a, T> Dispersed<'a, T> {
+        pub fn build() -> Builder<'a, T> {
+            Builder::new()
+        }
+    }
+
+    impl<'a, Wire> Channel<Wire> for Dispersed<'a, Wire> {
+        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
+            self.round_robin.access().send(data)
+        }
+
+        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
+            self.round_robin.access().recv()
+        }
+    }
+}
