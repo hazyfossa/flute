@@ -13,6 +13,29 @@ pub trait Rx<Wire> {
     async fn recv(&mut self) -> Result<Wire, Error>;
 }
 
+pub mod split {
+    use super::*;
+
+    pub trait Split<Wire> {
+        type Tx: Tx<Wire>;
+        type Rx: Rx<Wire>;
+        fn split(self) -> (Self::Tx, Self::Rx);
+    }
+
+    impl<Wire, A, B> Split<Wire> for super::merge::Merged<A, B>
+    where
+        A: Tx<Wire>,
+        B: Rx<Wire>,
+    {
+        type Tx = A;
+        type Rx = B;
+
+        fn split(self) -> (Self::Tx, Self::Rx) {
+            (self.tx, self.rx)
+        }
+    }
+}
+
 pub mod merge {
     use super::*;
     use crate::Channel;
@@ -46,63 +69,6 @@ pub mod merge {
         B: Rx<Wire>,
     {
         merge_remap(s.0, s.1)
-    }
-}
-
-pub mod split {
-    use super::*;
-
-    pub trait Split<Wire> {
-        type Tx: Tx<Wire>;
-        type Rx: Rx<Wire>;
-        fn split(self) -> (Self::Tx, Self::Rx);
-    }
-
-    impl<Wire, A, B> Split<Wire> for super::merge::Merged<A, B>
-    where
-        A: Tx<Wire>,
-        B: Rx<Wire>,
-    {
-        type Tx = A;
-        type Rx = B;
-
-        fn split(self) -> (Self::Tx, Self::Rx) {
-            (self.tx, self.rx)
-        }
-    }
-}
-
-pub mod add {
-    use super::{merge::*, split::*};
-
-    pub trait AddReceiver<Wire>: Split<Wire> {
-        fn add_receiver(self) -> (Merged<Self::Tx, Self::Rx>, Self::Rx);
-    }
-
-    impl<Wire, T: Split<Wire>> AddReceiver<Wire> for T
-    where
-        T::Rx: Clone,
-    {
-        fn add_receiver(self) -> (Merged<Self::Tx, Self::Rx>, Self::Rx) {
-            let (tx, rx) = self.split();
-            let new_rx = rx.clone();
-            (merge((tx, rx)), new_rx)
-        }
-    }
-
-    pub trait AddSender<Wire>: Split<Wire> {
-        fn add_sender(self) -> (Merged<Self::Tx, Self::Rx>, Self::Tx);
-    }
-
-    impl<Wire, T: Split<Wire>> AddSender<Wire> for T
-    where
-        T::Tx: Clone,
-    {
-        fn add_sender(self) -> (Merged<Self::Tx, Self::Rx>, Self::Tx) {
-            let (tx, rx) = self.split();
-            let new_tx = tx.clone();
-            (merge((tx, rx)), new_tx)
-        }
     }
 }
 
