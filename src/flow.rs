@@ -3,11 +3,15 @@ use std::marker::PhantomData;
 use serde::{Serialize, de::DeserializeOwned};
 use snafu::Snafu;
 
+// TODO: flow v2
+// decouple from serde
+// blocked on proper framing primitives (completion_io, substrate + frame, etc)
+// semi-blocked on BatchTx/Rx
+
 use crate::primitives::*;
 
 use data_format::*;
 pub mod data_format {
-    // TODO: decouple from serde
     use std::error::Error;
 
     use serde::{Serialize, de::DeserializeOwned};

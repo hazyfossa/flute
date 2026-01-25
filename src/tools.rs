@@ -1,6 +1,25 @@
 #[cfg(feature = "kanal")]
 pub mod in_memory {
-    pub use crate::compat::kanal::*;
+    pub use crate::{
+        compat::kanal::{self, KanalChannel},
+        modifiers::cross::*,
+    };
+
+    type InMemoryChannel<Wire> = Crossed<Wire, KanalChannel<Wire>, KanalChannel<Wire>>;
+
+    type InMemoryPair<Wire> = (InMemoryChannel<Wire>, InMemoryChannel<Wire>);
+
+    pub fn unbounded_pair<Wire>() -> InMemoryPair<Wire> {
+        let a = kanal::unbounded();
+        let b = kanal::unbounded();
+        cross(a, b)
+    }
+
+    pub fn bounded_pair<Wire>(size: usize) -> InMemoryPair<Wire> {
+        let a = kanal::bounded(size);
+        let b = kanal::bounded(size);
+        cross(a, b)
+    }
 }
 
 // TODO: make use of this in rpc client (need BatchedFlow trait?)

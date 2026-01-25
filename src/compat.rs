@@ -62,7 +62,7 @@ pub mod kanal {
         }
     }
 
-    type KanalChannel<T> = Merged<AsyncSender<T>, AsyncReceiver<T>>;
+    pub type KanalChannel<T> = Merged<AsyncSender<T>, AsyncReceiver<T>>;
 
     pub fn unbounded<T>() -> KanalChannel<T> {
         merge(kanal::unbounded_async())
