@@ -1,5 +1,5 @@
 # flute
-Flute is a utility crate for defining RPC interfaces. It is non-opinionated, focusing only on boilerplate code generation, leaving full control over the protocol.
+Flute is a utility crate for defining bi-directional channels and RPC interfaces. It is non-opinionated, focusing only on boilerplate code generation, leaving full control over the protocol.
 
 
 # todo
@@ -9,12 +9,13 @@ Flute is a utility crate for defining RPC interfaces. It is non-opinionated, foc
 - [ ] Tracing integration
 - [x] Futures Stream+Sink compat
 - [x] Dynamic channels
+- [ ] In-band error handling (fallible RPC)
 
 V2:
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing
-- [x] Primitive Multipath
+- [ ] Primitive Multipath
 - [ ] Channel priorities
 
 # Non-goals

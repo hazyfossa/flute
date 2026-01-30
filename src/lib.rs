@@ -1,5 +1,4 @@
 pub mod compat;
-pub mod flow;
 pub mod tools;
 
 pub mod core;
@@ -7,3 +6,13 @@ pub use core::*;
 
 #[cfg(feature = "define-rpc")]
 pub mod rpc;
+
+pub mod macros {
+    #[macro_export]
+    macro_rules! trait_alias {
+        ($vis:vis trait $name:ident : $($for:tt)*) => {
+            $vis trait $name: $($for)* {}
+            impl<T: $($for)*> $name for T {}
+        };
+    }
+}

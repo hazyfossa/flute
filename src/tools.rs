@@ -1,143 +1,150 @@
 #[cfg(feature = "kanal")]
 pub mod in_memory {
     pub use crate::{
-        compat::kanal::{self, KanalChannel},
-        define::cross::*,
+        compat::kanal::{self, KanalWire},
+        ops::cross::*,
     };
 
-    type InMemoryChannel<Wire> = Crossed<Wire, KanalChannel<Wire>, KanalChannel<Wire>>;
+    type InMemoryChannel<In, Out> = Crossed<KanalWire<In>, KanalWire<Out>>;
 
-    type InMemoryPair<Wire> = (InMemoryChannel<Wire>, InMemoryChannel<Wire>);
+    type InMemoryPair<In, Out> = (InMemoryChannel<In, Out>, InMemoryChannel<Out, In>);
 
-    pub fn unbounded_pair<Wire>() -> InMemoryPair<Wire> {
-        let a = kanal::unbounded();
-        let b = kanal::unbounded();
+    pub fn unbounded_pair<In, Out>() -> InMemoryPair<In, Out> {
+        let a: KanalWire<In> = kanal::unbounded();
+        let b: KanalWire<Out> = kanal::unbounded();
         cross(a, b)
     }
 
-    pub fn bounded_pair<Wire>(size: usize) -> InMemoryPair<Wire> {
-        let a = kanal::bounded(size);
-        let b = kanal::bounded(size);
+    pub fn bounded_pair<In, Out>(size: usize) -> InMemoryPair<In, Out> {
+        let a: KanalWire<In> = kanal::bounded(size);
+        let b: KanalWire<Out> = kanal::bounded(size);
         cross(a, b)
     }
 }
 
-// TODO: make use of this in rpc client (need BatchedFlow trait?)
-pub mod batching {
-    use std::any::Any;
+// NOTE: blocked on v3 (unframed streams, substrates)
 
-    use serde::{Deserialize, Serialize, de::DeserializeOwned};
+// pub mod batching {
+//     use std::any::Any;
 
-    use crate::flow::*;
+//     use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-    #[derive(Serialize, Deserialize)]
-    enum BatchingTag<T> {
-        Single(T),
-        Batch(Vec<T>),
-    }
+//     #[derive(Serialize, Deserialize)]
+//     enum BatchingTag<T> {
+//         Single(T),
+//         Batch(Vec<T>),
+//     }
 
-    pub struct WithBatching<F: Flow> {
-        flow: F,
-        buf: Vec<Box<dyn Any>>,
-    }
+//     pub struct WithBatching<F: Flow> {
+//         flow: F,
+//         buf: Vec<Box<dyn Any>>,
+//     }
 
-    impl<F: Flow> Flow for WithBatching<F> {
-        type Format = F::Format;
+//     impl<F: Flow> Flow for WithBatching<F> {
+//         type Format = F::Format;
 
-        async fn recv<V: DeserializeOwned + 'static>(&mut self) -> Result<V, FlowError> {
-            if let Some(previous_batch_unroll) = self.buf.pop() {
-                return Ok(*previous_batch_unroll.downcast().unwrap());
-            }
+//         async fn recv<V: DeserializeOwned + 'static>(&mut self) -> Result<V, FlowError> {
+//             if let Some(previous_batch_unroll) = self.buf.pop() {
+//                 return Ok(*previous_batch_unroll.downcast().unwrap());
+//             }
 
-            let tagged: BatchingTag<V> = self.flow.recv().await?;
-            match tagged {
-                BatchingTag::Single(data) => Ok(data),
-                BatchingTag::Batch(batch) => {
-                    for x in batch {
-                        self.buf.push(Box::new(x));
-                    }
-                    self.recv().await
-                }
-            }
-        }
+//             let tagged: BatchingTag<V> = self.flow.recv().await?;
+//             match tagged {
+//                 BatchingTag::Single(data) => Ok(data),
+//                 BatchingTag::Batch(batch) => {
+//                     for x in batch {
+//                         self.buf.push(Box::new(x));
+//                     }
+//                     self.recv().await
+//                 }
+//             }
+//         }
 
-        async fn send<V: Serialize + 'static>(&mut self, value: V) -> Result<(), FlowError> {
-            self.flow.send(BatchingTag::Single(value)).await
-        }
-    }
-}
+//         async fn send<V: Serialize + 'static>(&mut self, value: V) -> Result<(), FlowError> {
+//             self.flow.send(BatchingTag::Single(value)).await
+//         }
+//     }
+// }
 
-#[cfg(feature = "dyn")]
-pub mod disperse {
-    use crate::*;
+// #[cfg(feature = "dyn")]
+// pub mod disperse {
+//     use crate::{
+//         dynamic::{DynChannel, DynChannelExt},
+//         ops::split::Split,
+//         *,
+//     };
 
-    struct RoundRobin<T> {
-        values: Vec<T>,
-        current: usize,
-        cnt: u8,
-        switch_threshold: u8,
-    }
+//     struct RoundRobin<T> {
+//         values: Vec<T>,
+//         current: usize,
+//         cnt: u8,
+//         switch_threshold: u8,
+//     }
 
-    impl<T> RoundRobin<T> {
-        fn new(values: Vec<T>, switch_threshold: u8) -> Self {
-            Self {
-                values,
-                current: 0,
-                cnt: 0,
-                switch_threshold,
-            }
-        }
+//     impl<T> RoundRobin<T> {
+//         fn new(values: Vec<T>, switch_threshold: u8) -> Self {
+//             Self {
+//                 values,
+//                 current: 0,
+//                 cnt: 0,
+//                 switch_threshold,
+//             }
+//         }
 
-        fn access(&mut self) -> &mut T {
-            self.cnt += 1;
+//         fn access(&mut self) -> &mut T {
+//             self.cnt += 1;
 
-            if self.cnt >= self.switch_threshold {
-                self.cnt = 0;
-                self.current = (self.current + 1) % self.values.len();
-            }
+//             if self.cnt >= self.switch_threshold {
+//                 self.cnt = 0;
+//                 self.current = (self.current + 1) % self.values.len();
+//             }
 
-            &mut self.values[self.current]
-        }
-    }
+//             &mut self.values[self.current]
+//         }
+//     }
 
-    pub struct Builder<'a, Wire> {
-        inner: Vec<Box<DynChannel<'a, Wire>>>,
-    }
+//     pub struct Builder<T: Split> {
+//         inner: Vec<DynChannel<T>>,
+//     }
 
-    impl<'a, T> Builder<'a, T> {
-        fn new() -> Self {
-            Self { inner: Vec::new() }
-        }
+//     impl<T: Channel + Split + DynChannelExt> Builder<T>
+//     where
+//         C::Tx: 'static,
+//         C::Rx: 'static,
+//     {
+//         fn new() -> Self {
+//             Self { inner: Vec::new() }
+//         }
 
-        pub fn add(mut self, channel: impl Channel<T> + 'a) -> Self {
-            self.inner.push(DynChannel::new_box(channel));
-            self
-        }
+//         pub fn add<C>(mut self, channel: C) -> Self
+//         where
+//             C: Channel + DynChannelExt,
+//         {
+//             self.inner.push(channel.into_dynamic());
+//             self
+//         }
 
-        pub fn finish(self, switch_threshold: u8) -> Dispersed<'a, T> {
-            Dispersed {
-                round_robin: RoundRobin::new(self.inner, switch_threshold),
-            }
-        }
-    }
+//         pub fn finish(self, switch_threshold: u8) -> Dispersed<T> {
+//             Dispersed {
+//                 round_robin: RoundRobin::new(self.inner, switch_threshold),
+//             }
+//         }
+//     }
 
-    pub struct Dispersed<'a, T> {
-        round_robin: RoundRobin<Box<DynChannel<'a, T>>>,
-    }
+//     pub struct Dispersed<T> {
+//         round_robin: RoundRobin<DynChannel<T>>,
+//     }
 
-    impl<'a, T> Dispersed<'a, T> {
-        pub fn build() -> Builder<'a, T> {
-            Builder::new()
-        }
-    }
+//     impl<T> Dispersed<T> {
+//         pub fn build() -> Builder<T> {
+//             Builder::new()
+//         }
+//     }
 
-    impl<'a, Wire> Channel<Wire> for Dispersed<'a, Wire> {
-        fn send(&mut self, data: Wire) -> impl Future<Output = Result<(), Error>> {
-            self.round_robin.access().send(data)
-        }
-
-        fn recv(&mut self) -> impl Future<Output = Result<Wire, Error>> {
-            self.round_robin.access().recv()
-        }
-    }
-}
+//     impl<T: Channel + Split> Tx for Dispersed<T> {
+//         type In = T::In;
+//         fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
+//             self.round_robin.access().send(data)
+//         }
+//     }
+// }

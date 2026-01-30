@@ -1,63 +1,66 @@
-use std::{any::type_name, marker::PhantomData};
+use std::any::type_name;
 
-use crate::*;
-use snafu::Snafu;
+use crate::{error::ErrorProvider, *};
+use snafu::ResultExt;
 
-#[derive(Debug, Snafu)]
-#[snafu(display("{} transform error", type_name::<T>()))]
-pub struct TransformError<T: Transform + ?Sized> {
-    _t: PhantomData<T>,
-    source: Box<dyn std::error::Error>,
-}
-
-pub trait Transform {
+pub trait Transform: ErrorProvider {
     type In;
     type Out;
 
-    fn encode(&mut self, data: Self::In) -> Result<Self::Out, TransformError<Self>>;
-    fn decode(&mut self, data: Self::Out) -> Result<Self::In, TransformError<Self>>;
+    fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error>;
+    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
 }
 
-pub struct Transformed<C, T> {
-    channel: C,
+pub struct Transformed<T, I> {
     transform: T,
+    inner: I,
 }
 
-impl<Wire, C, T> Channel<T::In> for Transformed<C, T>
+impl<T, I> Rx for Transformed<T, I>
 where
-    C: Channel<Wire>,
-    T: Transform<Out = Wire>,
+    T: Transform,
+    I: Rx<Out = T::Out>,
 {
-    async fn send(&mut self, data: T::In) -> Result<(), Error> {
-        let data = self.transform.encode(data)?;
-        Ok(self.channel.send(data).await?)
-    }
-
+    type Out = T::In;
     async fn recv(&mut self) -> Result<T::In, Error> {
-        let data = self.channel.recv().await?;
-        Ok(self.transform.decode(data)?)
+        let data = self.inner.recv().await?;
+
+        let transformed = self
+            .transform
+            .decode(data)
+            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+
+        Ok(transformed)
     }
 }
 
-impl<T: Transform> From<TransformError<T>> for Error {
-    fn from(value: TransformError<T>) -> Self {
-        Error::Other {
-            message: value.to_string(),
-            source: Some(value.source),
-        }
+impl<T, I> Tx for Transformed<T, I>
+where
+    T: Transform,
+    I: Tx<In = T::Out>,
+{
+    type In = T::In;
+
+    async fn send(&mut self, data: T::In) -> Result<(), Error> {
+        let transformed = self
+            .transform
+            .encode(data)
+            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+
+        Ok(self.inner.send(transformed).await?)
     }
 }
 
-pub trait ChannelTransformExt<Wire>: Channel<Wire> {
-    fn transform<T: Transform>(self, transform: T) -> Transformed<Self, T>
+pub trait TransformExt {
+    fn transform<T: Transform>(self, transform: T) -> Transformed<T, Self>
     where
         Self: Sized,
     {
         Transformed {
-            channel: self,
             transform,
+            inner: self,
         }
     }
 }
 
-impl<Wire, T: Channel<Wire>> ChannelTransformExt<Wire> for T {}
+impl<T: Channel> TransformExt for T {}

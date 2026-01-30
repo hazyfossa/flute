@@ -1,17 +1,15 @@
-use serde::{Deserialize, Serialize};
-
 #[macro_export]
 macro_rules! define_rpc {
     ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {
-    use $crate::{flow, rpc::*};
+    use $crate::{Channel, rpc::*};
 
     paste::paste!{
-        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(Debug, serde::Serialize, serde::Deserialize)]
         pub enum [<$service Request>] {
             $($function { $($field: $field_type),* }),*
         }
 
-        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(Debug, serde::Serialize, serde::Deserialize)]
         pub enum [<$service Response>] {
             $($function($response)),*
         }
@@ -24,14 +22,19 @@ macro_rules! define_rpc {
                 fn [<$function:snake>](&self, $($field: $field_type),*) -> $response;
             )*
 
-            async fn serve(&mut self, mut flow: impl flow::Flow) -> Result<(), flow::FlowError>
+            async fn serve<C>(&mut self, mut channel: C) -> Result<(), $crate::Error>
+            where
+                C: $crate::Channel<
+                    In = [<$service Response>],
+                    Out = [<$service Request>],
+                >
                 {
                     loop {
-                        match flow.recv().await? {
+                        match channel.recv().await? {
                             $([<$service Request>]::$function { $($field),* } => {
                                 let response = self.[<$function:snake>]($($field),*);
 
-                                flow.send(response).await?;
+                                channel.send( [<$service Response>]::$function(response) ).await?;
                             }),*
                         }
                     }
@@ -39,36 +42,35 @@ macro_rules! define_rpc {
         }
 
 
-        pub struct $service<F>(F);
+        pub struct $service<C>(C);
 
-        impl<F: flow::Flow> $service<F>
+        impl<C> $service<C>
+        where
+            C: $crate::Channel<
+                In = [<$service Request>],
+                Out = [<$service Response>],
+            >
         {
-            pub fn bind(flow: F) -> Self {
-                Self(flow)
+            pub fn bind(channel: C) -> Self {
+                Self(channel)
             }
 
             $(pub async fn [<$function:snake>](
                 &mut self, $($field: $field_type),*
-            ) -> Result<$response, flow::FlowError> {
+            ) -> Result<$response, $crate::Error> {
                 let request = [<$service Request>]::$function { $($field),* };
+
                 self.0.send(request).await?;
-                Ok(self.0.recv().await?)
+
+                match self.0.recv().await? {
+                    [<$service Response>]::$function(ret) => Ok(ret),
+                    other => Err($crate::Error::Other {
+                        message: format!("invalid response for {}: {:?}", stringify!($function), other),
+                        source: None
+                    }.into()
+                    )
+                }
             })*
         }
     }};
 }
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct RpcError {
-    message: String,
-}
-
-impl<T: ToString> From<T> for RpcError {
-    fn from(value: T) -> Self {
-        Self {
-            message: value.to_string(),
-        }
-    }
-}
-
-pub type RpcResult<T> = std::result::Result<T, RpcError>;

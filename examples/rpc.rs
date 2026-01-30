@@ -1,23 +1,27 @@
-use flute::{define_rpc, flow::UseFlow, tools::in_memory};
+use flute::{define_rpc, tools::in_memory};
+use futures_util::future::join;
 
-define_rpc!(SimpleService {
+define_rpc!(Simple {
     Echo {something: String} -> String,
-    TryEcho { maybe_string: Vec<u8> } -> RpcResult<String>
 });
 
 struct Server;
-impl SimpleServiceHandler for Server {
+impl SimpleHandler for Server {
     fn echo(&self, something: String) -> String {
         something
-    }
-
-    fn try_echo(&self, maybe_string: Vec<u8>) -> RpcResult<String> {
-        let string = String::try_from(maybe_string)?;
-        Ok(string)
     }
 }
 
 fn main() {
-    let (client, server_channel) = in_memory::unbounded_pair::<Vec<u8>>();
-    Server.serve(server_channel.with_data_format());
+    let (client_channel, server_channel) =
+        in_memory::unbounded_pair::<SimpleRequest, SimpleResponse>();
+
+    smol::block_on(join(
+        (async || Server.serve(server_channel).await.unwrap())(),
+        (async || {
+            let mut client = Simple::bind(client_channel);
+            let a = client.echo("Hello".into()).await.unwrap();
+            println!("{a}, world!")
+        })(),
+    ));
 }
