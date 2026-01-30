@@ -1,7 +1,6 @@
 #[macro_export]
 macro_rules! define_rpc {
     ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {
-    use $crate::{Channel, rpc::*};
 
     paste::paste!{
         #[derive(Debug, serde::Serialize, serde::Deserialize)]
