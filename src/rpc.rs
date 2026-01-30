@@ -3,12 +3,12 @@ macro_rules! define_rpc {
     ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {
 
     paste::paste!{
-        #[derive(Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(serde::Serialize, serde::Deserialize)]
         pub enum [<$service Request>] {
             $($function { $($field: $field_type),* }),*
         }
 
-        #[derive(Debug, serde::Serialize, serde::Deserialize)]
+        #[derive(serde::Serialize, serde::Deserialize)]
         pub enum [<$service Response>] {
             $($function($response)),*
         }
@@ -63,8 +63,10 @@ macro_rules! define_rpc {
 
                 match self.0.recv().await? {
                     [<$service Response>]::$function(ret) => Ok(ret),
-                    other => Err($crate::Error::Other {
-                        message: format!("invalid response for {}: {:?}", stringify!($function), other),
+                    _ => Err($crate::Error::Other {
+                        // TODO: we cannot print other here, as that forces Debug
+                        // work around by codegen per field? Adds bloat...
+                        message: format!("got invalid response for {}", stringify!($function)),
                         source: None
                     }.into()
                     )
