@@ -110,10 +110,12 @@ pub mod json {
         type Error = serde_json::error::Error;
     }
 
-    impl<Value: Serialize> TransformTx for Json<Value> {
+    impl<Value> TransformFraming for Json<Value> {
         type In = Value;
         type Out = Vec<u8>;
+    }
 
+    impl<Value: Serialize> TransformTx for Json<Value> {
         fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
             Ok(serde_json::to_vec(&data)?)
         }
@@ -121,9 +123,6 @@ pub mod json {
 
     // TODO: slices are blocked on v3
     impl<'de, Value: DeserializeOwned> TransformRx for Json<Value> {
-        type In = Value;
-        type Out = Vec<u8>;
-
         fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
             Ok(serde_json::from_slice(&data)?)
         }
@@ -144,10 +143,12 @@ pub mod postcard {
         type Error = postcard::Error;
     }
 
-    impl<Value: Serialize> TransformTx for Postcard<Value> {
+    impl<Value> TransformFraming for Postcard<Value> {
         type In = Value;
         type Out = Vec<u8>;
+    }
 
+    impl<Value: Serialize> TransformTx for Postcard<Value> {
         fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
             Ok(postcard::to_stdvec(&data)?)
         }
@@ -155,9 +156,6 @@ pub mod postcard {
 
     // TODO: slices are blocked on v3
     impl<'de, Value: DeserializeOwned> TransformRx for Postcard<Value> {
-        type In = Value;
-        type Out = Vec<u8>;
-
         fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
             Ok(postcard::from_bytes(&data)?)
         }

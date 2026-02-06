@@ -3,20 +3,15 @@ use std::any::type_name;
 use crate::{error::ErrorProvider, *};
 use snafu::ResultExt;
 
-pub trait Transform {} // marker
-
-pub trait TransformTx: ErrorProvider {
+pub trait TransformFraming: ErrorProvider {
     type In;
     type Out;
-
-    fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error>;
 }
 
-pub trait TransformRx: ErrorProvider {
-    type In;
-    type Out;
+// Tx
 
-    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
+pub trait TransformTx: TransformFraming {
+    fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error>;
 }
 
 pub struct TransformedTx<T, I> {
@@ -41,6 +36,25 @@ where
     }
 }
 
+// passthrough
+impl<T, I> Rx for TransformedTx<T, I>
+where
+    T: TransformTx,
+    I: Rx,
+{
+    type Out = I::Out;
+
+    fn recv(&mut self) -> impl Future<Output = Result<Self::Out, Error>> {
+        self.inner.recv()
+    }
+}
+
+// Rx
+
+pub trait TransformRx: TransformFraming {
+    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
+}
+
 pub struct TransformedRx<T, I> {
     transform: T,
     inner: I,
@@ -63,6 +77,21 @@ where
         Ok(transformed)
     }
 }
+
+// passthrough
+impl<T, I> Tx for TransformedRx<T, I>
+where
+    T: TransformRx,
+    I: Tx,
+{
+    type In = I::In;
+
+    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
+        self.inner.send(data)
+    }
+}
+
+// Ext (interface)
 
 pub trait TransformExt: Sized {
     fn transform<T: TransformTx + TransformRx + Copy>(
