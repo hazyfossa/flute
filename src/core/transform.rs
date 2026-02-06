@@ -91,19 +91,60 @@ where
     }
 }
 
+// TODO: this is just a duplicate of the above
+// made for transforms which stare internal, un-splittable channel state
+// (of both tx/rx). Crypto libraries are one example.
+// Is there really no way to avoid the boilerplate?
+//
+// We should really overhaul the primitives-transparency vs ease-of-use
+// thing before V2
+pub struct Transformed<T, I> {
+    transform: T,
+    inner: I,
+}
+
+impl<T, I> Tx for Transformed<T, I>
+where
+    T: TransformTx,
+    I: Tx<In = T::Out>,
+{
+    type In = T::In;
+
+    async fn send(&mut self, data: T::In) -> Result<(), Error> {
+        let transformed = self
+            .transform
+            .encode(data)
+            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+
+        Ok(self.inner.send(transformed).await?)
+    }
+}
+
+impl<T, I> Rx for Transformed<T, I>
+where
+    T: TransformRx,
+    I: Rx<Out = T::Out>,
+{
+    type Out = T::In;
+    async fn recv(&mut self) -> Result<T::In, Error> {
+        let data = self.inner.recv().await?;
+
+        let transformed = self
+            .transform
+            .decode(data)
+            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+
+        Ok(transformed)
+    }
+}
+
 // Ext (interface)
 
 pub trait TransformExt: Sized {
-    fn transform<T: TransformTx + TransformRx + Copy>(
-        self,
-        transform: T,
-    ) -> TransformedTx<T, TransformedRx<T, Self>> {
-        TransformedTx {
+    fn transform<T: TransformTx + TransformRx>(self, transform: T) -> Transformed<T, Self> {
+        Transformed {
             transform,
-            inner: TransformedRx {
-                transform,
-                inner: self,
-            },
+            inner: self,
         }
     }
 
