@@ -12,6 +12,7 @@ Flute is a utility crate for defining bi-directional channels and RPC interfaces
 - [ ] In-band error handling (fallible RPC)
 
 V2:
+- [ ] Easier transform / channel definition
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing

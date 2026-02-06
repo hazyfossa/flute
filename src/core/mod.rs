@@ -27,16 +27,6 @@ pub enum Error {
     },
 }
 
-// TODO: consider making Wire an associated type
-// pros: more concise code (at some places)
-// cons:
-// cannot make a channel what accepts different wire types
-// PhantomData<Wire> (at some places)
-
-// TODO: this definition only exists for Dyn puposes now
-// otherwise we can merge Channel: Tx + Rx
-// #[cfg_attr(feature = "dyn", dynosaur::dynosaur(pub DynChannel = dyn(box) Channel, bridge(none)))]
-
 crate::trait_alias!(pub trait Channel: Tx + Rx);
 pub trait Wire<T>: Channel<In = T, Out = T> {}
 impl<T, W: Channel<In = T, Out = T>> Wire<T> for W {}

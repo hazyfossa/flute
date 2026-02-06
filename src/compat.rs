@@ -102,7 +102,7 @@ pub mod json {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use crate::{error::ErrorProvider, transform::Transform};
+    use crate::{error::ErrorProvider, transform::*};
 
     pub struct Json<Value>(PhantomData<Value>);
 
@@ -110,14 +110,19 @@ pub mod json {
         type Error = serde_json::error::Error;
     }
 
-    // TODO: slices are blocked on v3
-    impl<'de, Value: Serialize + DeserializeOwned> Transform for Json<Value> {
+    impl<Value: Serialize> TransformTx for Json<Value> {
         type In = Value;
         type Out = Vec<u8>;
 
         fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
             Ok(serde_json::to_vec(&data)?)
         }
+    }
+
+    // TODO: slices are blocked on v3
+    impl<'de, Value: DeserializeOwned> TransformRx for Json<Value> {
+        type In = Value;
+        type Out = Vec<u8>;
 
         fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
             Ok(serde_json::from_slice(&data)?)
