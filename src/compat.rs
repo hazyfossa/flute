@@ -131,4 +131,35 @@ pub mod json {
 }
 
 #[cfg(feature = "data-postcard")]
-mod postcard {}
+pub mod postcard {
+    use std::marker::PhantomData;
+
+    use serde::{Serialize, de::DeserializeOwned};
+
+    use crate::{error::ErrorProvider, transform::*};
+
+    pub struct Postcard<Value>(PhantomData<Value>);
+
+    impl<Value> ErrorProvider for Postcard<Value> {
+        type Error = postcard::Error;
+    }
+
+    impl<Value: Serialize> TransformTx for Postcard<Value> {
+        type In = Value;
+        type Out = Vec<u8>;
+
+        fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
+            Ok(postcard::to_stdvec(&data)?)
+        }
+    }
+
+    // TODO: slices are blocked on v3
+    impl<'de, Value: DeserializeOwned> TransformRx for Postcard<Value> {
+        type In = Value;
+        type Out = Vec<u8>;
+
+        fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
+            Ok(postcard::from_bytes(&data)?)
+        }
+    }
+}

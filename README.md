@@ -19,6 +19,10 @@ V2:
 - [ ] Primitive Multipath
 - [ ] Channel priorities
 
+V3:
+-- completion-based io primitives
+-- (proper work on performance delayed until this)
+
 # Non-goals
 - Defining our own transport
 - Defining our own framing
