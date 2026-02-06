@@ -4,7 +4,7 @@ Flute is a utility crate for defining bi-directional channels and RPC interfaces
 
 # todo
 - [ ] Documentation
-- [ ] Examples
+- [x] Examples
 - [x] Better error handling (snafu)
 - [ ] Tracing integration
 - [x] Futures Stream+Sink compat
