@@ -9,19 +9,18 @@ pub mod futures {
 
     use crate::{Error, Rx, Tx, ops::split};
 
-    pub struct Adapter<T, Wire> {
+    struct Adapter<T, Wire> {
         inner: T,
         // TODO: is there really no way
         // to bridge sink without this?
         _wire: PhantomData<Wire>,
     }
 
-    impl<T, Wire> Adapter<T, Wire> {
-        pub fn wrap(future: T) -> Self {
-            Self {
-                inner: future,
-                _wire: PhantomData,
-            }
+    #[allow(private_interfaces)]
+    pub fn adapt<Fut, Wire>(future: Fut) -> Adapter<Fut, Wire> {
+        Adapter {
+            inner: future,
+            _wire: PhantomData,
         }
     }
 
@@ -56,7 +55,7 @@ pub mod futures {
 
         fn split(self) -> (Self::Tx, Self::Rx) {
             let (tx, rx) = self.inner.split();
-            (Adapter::wrap(tx), Adapter::wrap(rx))
+            (adapt(tx), adapt(rx))
         }
     }
 }
@@ -104,7 +103,11 @@ pub mod json {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    pub struct Json<Value>(pub PhantomData<Value>);
+    struct Json<Value>(PhantomData<Value>);
+    #[allow(private_interfaces)]
+    pub fn json<Value>() -> Json<Value> {
+        Json(PhantomData)
+    }
 
     impl<Value> ErrorProvider for Json<Value> {
         type Error = serde_json::error::Error;
@@ -137,7 +140,11 @@ pub mod postcard {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    pub struct Postcard<Value>(pub PhantomData<Value>);
+    struct Postcard<Value>(PhantomData<Value>);
+    #[allow(private_interfaces)]
+    pub fn postcard<Value>() -> Postcard<Value> {
+        Postcard(PhantomData)
+    }
 
     impl<Value> ErrorProvider for Postcard<Value> {
         type Error = postcard::Error;
