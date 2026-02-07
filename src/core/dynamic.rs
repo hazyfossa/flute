@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 // TODO: v3 should allow more efficient dispatch
 // on the r/w level, which hopefully reduces boxing
 

@@ -8,18 +8,21 @@ pub trait TransformFraming: ErrorProvider {
     type Out;
 }
 
-// Tx
-
 pub trait TransformTx: TransformFraming {
     fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error>;
 }
 
-pub struct TransformedTx<T, I> {
+pub trait TransformRx: TransformFraming {
+    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
+}
+
+pub struct Transformed<T, I, const TX: bool, const RX: bool> {
     transform: T,
     inner: I,
 }
 
-impl<T, I> Tx for TransformedTx<T, I>
+// If TX == true, transform tx
+impl<T, I, const ANY: bool> Tx for Transformed<T, I, true, ANY>
 where
     T: TransformTx,
     I: Tx<In = T::Out>,
@@ -36,8 +39,40 @@ where
     }
 }
 
-// passthrough
-impl<T, I> Rx for TransformedTx<T, I>
+// If TX == false, passtrough tx
+impl<T, I, const ANY: bool> Tx for Transformed<T, I, false, ANY>
+where
+    T: TransformTx,
+    I: Tx<In = T::Out>,
+{
+    type In = I::In;
+
+    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
+        self.inner.send(data)
+    }
+}
+
+// If RX == true, transform rx
+impl<T, I, const ANY: bool> Rx for Transformed<T, I, ANY, true>
+where
+    T: TransformRx,
+    I: Rx<Out = T::Out>,
+{
+    type Out = T::In;
+    async fn recv(&mut self) -> Result<T::In, Error> {
+        let data = self.inner.recv().await?;
+
+        let transformed = self
+            .transform
+            .decode(data)
+            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+
+        Ok(transformed)
+    }
+}
+
+// If RX == false, passthrough rx
+impl<T, I, const ANY: bool> Rx for Transformed<T, I, ANY, false>
 where
     T: TransformTx,
     I: Rx,
@@ -49,114 +84,28 @@ where
     }
 }
 
-// Rx
-
-pub trait TransformRx: TransformFraming {
-    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
-}
-
-pub struct TransformedRx<T, I> {
-    transform: T,
-    inner: I,
-}
-
-impl<T, I> Rx for TransformedRx<T, I>
-where
-    T: TransformRx,
-    I: Rx<Out = T::Out>,
-{
-    type Out = T::In;
-    async fn recv(&mut self) -> Result<T::In, Error> {
-        let data = self.inner.recv().await?;
-
-        let transformed = self
-            .transform
-            .decode(data)
-            .whatever_context(format!("{} transform error", type_name::<T>()))?;
-
-        Ok(transformed)
-    }
-}
-
-// passthrough
-impl<T, I> Tx for TransformedRx<T, I>
-where
-    T: TransformRx,
-    I: Tx,
-{
-    type In = I::In;
-
-    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
-        self.inner.send(data)
-    }
-}
-
-// TODO: this is just a duplicate of the above
-// made for transforms which stare internal, un-splittable channel state
-// (of both tx/rx). Crypto libraries are one example.
-// Is there really no way to avoid the boilerplate?
-//
-// We should really overhaul the primitives-transparency vs ease-of-use
-// thing before V2
-pub struct Transformed<T, I> {
-    transform: T,
-    inner: I,
-}
-
-impl<T, I> Tx for Transformed<T, I>
-where
-    T: TransformTx,
-    I: Tx<In = T::Out>,
-{
-    type In = T::In;
-
-    async fn send(&mut self, data: T::In) -> Result<(), Error> {
-        let transformed = self
-            .transform
-            .encode(data)
-            .whatever_context(format!("{} transform error", type_name::<T>()))?;
-
-        Ok(self.inner.send(transformed).await?)
-    }
-}
-
-impl<T, I> Rx for Transformed<T, I>
-where
-    T: TransformRx,
-    I: Rx<Out = T::Out>,
-{
-    type Out = T::In;
-    async fn recv(&mut self) -> Result<T::In, Error> {
-        let data = self.inner.recv().await?;
-
-        let transformed = self
-            .transform
-            .decode(data)
-            .whatever_context(format!("{} transform error", type_name::<T>()))?;
-
-        Ok(transformed)
-    }
-}
-
 // Ext (interface)
 
 pub trait TransformExt: Sized {
-    fn transform<T: TransformTx + TransformRx>(self, transform: T) -> Transformed<T, Self> {
+    fn transform<T: TransformTx + TransformRx>(
+        self,
+        transform: T,
+    ) -> Transformed<T, Self, true, true> {
         Transformed {
             transform,
             inner: self,
         }
     }
 
-    fn transform_tx<T: TransformTx>(self, transform: T) -> TransformedTx<T, Self> {
-        TransformedTx {
+    fn transform_tx<T: TransformTx>(self, transform: T) -> Transformed<T, Self, true, false> {
+        Transformed {
             transform,
             inner: self,
         }
     }
 
-    fn transform_rx<T: TransformRx>(self, transform: T) -> TransformedRx<T, Self> {
-        TransformedRx {
+    fn transform_rx<T: TransformRx>(self, transform: T) -> Transformed<T, Self, false, true> {
+        Transformed {
             transform,
             inner: self,
         }

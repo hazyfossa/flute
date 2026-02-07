@@ -104,7 +104,7 @@ pub mod json {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    pub struct Json<Value>(PhantomData<Value>);
+    pub struct Json<Value>(pub PhantomData<Value>);
 
     impl<Value> ErrorProvider for Json<Value> {
         type Error = serde_json::error::Error;
@@ -137,7 +137,7 @@ pub mod postcard {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    pub struct Postcard<Value>(PhantomData<Value>);
+    pub struct Postcard<Value>(pub PhantomData<Value>);
 
     impl<Value> ErrorProvider for Postcard<Value> {
         type Error = postcard::Error;
