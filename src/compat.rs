@@ -103,8 +103,8 @@ pub mod json {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    struct Json<Value>(PhantomData<Value>);
-    #[allow(private_interfaces)]
+    // TODO: would generics on transform trait eliminate this PhantomData?
+    pub struct Json<Value>(PhantomData<Value>);
     pub fn json<Value>() -> Json<Value> {
         Json(PhantomData)
     }
@@ -140,8 +140,7 @@ pub mod postcard {
 
     use crate::{error::ErrorProvider, transform::*};
 
-    struct Postcard<Value>(PhantomData<Value>);
-    #[allow(private_interfaces)]
+    pub struct Postcard<Value>(PhantomData<Value>);
     pub fn postcard<Value>() -> Postcard<Value> {
         Postcard(PhantomData)
     }

@@ -7,7 +7,7 @@ pub use core::*;
 #[cfg(feature = "define-rpc")]
 pub mod rpc;
 
-pub mod macros {
+mod macros {
     #[macro_export]
     macro_rules! trait_alias {
         ($vis:vis trait $name:ident : $($for:tt)*) => {

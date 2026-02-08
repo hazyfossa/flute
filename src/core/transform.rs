@@ -39,11 +39,11 @@ where
     }
 }
 
-// If TX == false, passtrough tx
+// If TX == false, passthrough tx
 impl<T, I, const ANY: bool> Tx for Transformed<T, I, false, ANY>
 where
     T: TransformTx,
-    I: Tx<In = T::Out>,
+    I: Tx,
 {
     type In = I::In;
 

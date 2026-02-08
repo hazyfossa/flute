@@ -27,6 +27,10 @@ pub enum Error {
     },
 }
 
+// TODO: docs on trait_alias
+// A channel is a combination of a Receiver and Transmitter
 crate::trait_alias!(pub trait Channel: Tx + Rx);
+
+/// A wire is a channel, for which input and output are the same
 pub trait Wire<T>: Channel<In = T, Out = T> {}
 impl<T, W: Channel<In = T, Out = T>> Wire<T> for W {}

@@ -1,3 +1,5 @@
+// TODO: channel setup flow. Server/Client-tagged channels?
+
 #[macro_export]
 macro_rules! define_rpc {
     ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {

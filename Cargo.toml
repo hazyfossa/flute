@@ -22,4 +22,4 @@ kanal = ["dep:kanal"]
 data-json = ["dep:serde_json"]
 data-postcard = ["dep:postcard"]
 
-examples = ["dep:smol", "futures", "kanal", "define-rpc"]
+examples = ["dep:smol", "futures", "kanal", "define-rpc", "data-json"]
