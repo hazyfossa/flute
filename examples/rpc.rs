@@ -1,4 +1,4 @@
-use flute::{define_rpc, tools::in_memory};
+use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
 use futures_util::future::join;
 
 // The syntax for defining services is a mix between enum fields and function defintions
@@ -14,8 +14,13 @@ define_rpc!(Simple {
 // To define a server, implement {Service}Handler trait.
 struct Server;
 impl SimpleHandler for Server {
-    fn echo(&self, something: String) -> String {
-        something
+    // All RPC functions are fallible by default.
+    // RpcResult will convert any error to a string via Display,
+    // then send it on the wire. Note that this may drop context of the error.
+    //
+    // This is expected to change once we finalize our error handling scheme.
+    fn echo(&self, something: String) -> RpcResult<String> {
+        Ok(something)
     }
 }
 

@@ -1,5 +1,7 @@
 // TODO: channel setup flow. Server/Client-tagged channels?
 
+use snafu::Snafu;
+
 #[macro_export]
 macro_rules! define_rpc {
     ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {
@@ -12,6 +14,7 @@ macro_rules! define_rpc {
 
         #[derive(serde::Serialize, serde::Deserialize)]
         pub enum [<$service Response>] {
+            _Error { message: String },
             $($function($response)),*
         }
 
@@ -20,7 +23,7 @@ macro_rules! define_rpc {
         pub trait [<$service Handler>]
         {
             $(
-                fn [<$function:snake>](&self, $($field: $field_type),*) -> $response;
+                fn [<$function:snake>](&self, $($field: $field_type),*) -> $crate::rpc::RpcResult<$response>;
             )*
 
             async fn serve<C>(&mut self, mut channel: C) -> Result<(), $crate::Error>
@@ -33,9 +36,14 @@ macro_rules! define_rpc {
                     loop {
                         match channel.recv().await? {
                             $([<$service Request>]::$function { $($field),* } => {
-                                let response = self.[<$function:snake>]($($field),*);
+                                let ret = self.[<$function:snake>]($($field),*);
 
-                                channel.send( [<$service Response>]::$function(response) ).await?;
+                                let response = match ret {
+                                    Ok(value) => [<$service Response>]::$function(value),
+                                    Err(e) => [<$service Response>]::_Error { message: e.message },
+                                };
+
+                                channel.send( response ).await?;
                             }),*
                         }
                     }
@@ -58,13 +66,19 @@ macro_rules! define_rpc {
 
             $(pub async fn [<$function:snake>](
                 &mut self, $($field: $field_type),*
-            ) -> Result<$response, $crate::Error> {
+            ) -> Result<$response, $crate::rpc::ClientError> {
                 let request = [<$service Request>]::$function { $($field),* };
 
                 self.0.send(request).await?;
 
                 match self.0.recv().await? {
+                    // Ok
                     [<$service Response>]::$function(ret) => Ok(ret),
+
+                    // Remote function failed
+                    [<$service Response>]::_Error { message } => Err($crate::rpc::ClientError::FunctionError { message }),
+
+                    // Invalid response
                     _ => Err($crate::Error::Other {
                         // TODO: we cannot print other here, as that forces Debug
                         // work around by codegen per field? Adds bloat...
@@ -76,4 +90,27 @@ macro_rules! define_rpc {
             })*
         }
     }};
+}
+
+pub struct RpcErrorHatch {
+    pub message: String,
+}
+
+impl<T: ToString> From<T> for RpcErrorHatch {
+    fn from(value: T) -> Self {
+        Self {
+            message: value.to_string(),
+        }
+    }
+}
+
+pub type RpcResult<T> = std::result::Result<T, RpcErrorHatch>;
+
+#[derive(Debug, Snafu)]
+pub enum ClientError {
+    #[snafu(transparent)]
+    ChannelError { source: crate::Error },
+
+    #[snafu(display("{message}"))]
+    FunctionError { message: String },
 }
