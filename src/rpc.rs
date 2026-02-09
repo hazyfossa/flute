@@ -4,12 +4,14 @@ use snafu::Snafu;
 
 #[macro_export]
 macro_rules! define_rpc {
-    ($service:ident {
+    ($vis:vis $service:ident {
         $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty),* $(,)?
     }) => {
 
     #[allow(non_snake_case)]
-    mod $service {
+    $vis mod $service {
+        use super::*;
+
         #[allow(async_fn_in_trait)]
         pub trait Handler
         {
@@ -30,9 +32,6 @@ macro_rules! define_rpc {
             _Error { message: String },
             $($function($response)),*
         }
-
-
-
 
         pub async fn server<C>(handler: impl Handler, mut channel: C) -> Result<(), $crate::Error>
         where
