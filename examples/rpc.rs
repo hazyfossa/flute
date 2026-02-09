@@ -1,22 +1,21 @@
 use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
-use futures_util::future::join;
 
-// The syntax for defining services is a mix between enum fields and function defintions
+// The syntax for defining services is similar to traits
 //
 // Flute derives for you automatically three core primitives:
 // - Client interface
 // - Server definition boilerplate
 // - Request/Response as complete enum types
 define_rpc!(Simple {
-    Echo {something: String} -> String,
+    fn echo(something: String) -> String,
 });
 
-// To define a server, implement {Service}Handler trait.
+// To define a server, implement the Handler trait.
 struct Server;
-impl SimpleHandler for Server {
+impl Simple::Handler for Server {
     // All RPC functions are fallible by default.
-    // RpcResult will convert any error to a string via Display,
-    // then send it on the wire. Note that this may drop context of the error.
+    // RpcResult will convert any error to a string via Display, then send it on the wire.
+    // Note that this may drop context of the error.
     //
     // This is expected to change once we finalize our error handling scheme.
     fn echo(&self, something: String) -> RpcResult<String> {
@@ -27,22 +26,22 @@ impl SimpleHandler for Server {
 fn main() {
     // This creates an in-memory channel pair, suitable for in-process communcation
     let (client_channel, server_channel) =
-        in_memory::unbounded_pair::<SimpleRequest, SimpleResponse>();
+        in_memory::unbounded_pair::<Simple::Request, Simple::Response>();
+
+    // To create a server, simply call ::server with a handler and an appropriate channel
+    let server = Simple::server(Server, server_channel);
+
+    // Server is just a future that enters a loop.
+    // You can make it a background task, join with other futures, etc.
+    // Flute is in no way dependent on smol, you can use any other runtime!
+    smol::spawn(server).detach();
 
     // Here we execute both sides simultaneously
     // In a real-world application, these two parts can be in two different binaries
-    // both of which depend on a "service-definition" crate containing the code above main
-    smol::block_on(join(
-        // Simply call .serve with an appropriate channel
-        // flute will route the requests to your functions based on the Handler trait
-        (async || Server.serve(server_channel).await.unwrap())(),
-        //
-        // Call Service::bind on a channel to connect
-        // you then can call remote functions as if they are local!
-        (async || {
-            let mut client = Simple::bind(client_channel);
-            let a = client.echo("Hello".into()).await.unwrap();
-            println!("{a}, world!")
-        })(),
-    ));
+    // both of which depend on a "service-definition" crate containing the define_rpc!
+    smol::block_on(async {
+        let mut client = Simple::client(client_channel);
+        let a = client.echo("Hello".into()).await.unwrap();
+        println!("{a}, world!")
+    });
 }

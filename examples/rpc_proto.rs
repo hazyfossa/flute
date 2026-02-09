@@ -8,18 +8,18 @@ use flute::{
 };
 
 define_rpc!(Simple {
-    Echo {something: String} -> String,
+    fn echo(something: String) -> String,
 });
 
 pub async fn setup_server(
     channel: impl Wire<Vec<u8>>,
-) -> impl Channel<In = SimpleRequest, Out = SimpleResponse> {
+) -> impl Channel<In = Simple::Request, Out = Simple::Response> {
     channel.transform_tx(json()).transform_rx(json())
 }
 
 pub async fn setup_client(
     channel: impl Wire<Vec<u8>>,
-) -> impl Channel<In = SimpleResponse, Out = SimpleRequest> {
+) -> impl Channel<In = Simple::Response, Out = Simple::Request> {
     channel.transform_rx(json()).transform_tx(json())
 }
 

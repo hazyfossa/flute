@@ -4,79 +4,82 @@ use snafu::Snafu;
 
 #[macro_export]
 macro_rules! define_rpc {
-    ($service:ident { $($function:ident { $($field:ident: $field_type:ty),* } -> $response:ty),* $(,)? }) => {
+    ($service:ident {
+        $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty),* $(,)?
+    }) => {
 
-    paste::paste!{
+    #[allow(non_snake_case)]
+    mod $service {
+        #[allow(async_fn_in_trait)]
+        pub trait Handler
+        {
+            $(
+                fn $function(&self, $($field: $field_type),*) -> $crate::rpc::RpcResult<$response>;
+            )*
+        }
+
+        #[allow(non_camel_case_types)]
         #[derive(serde::Serialize, serde::Deserialize)]
-        pub enum [<$service Request>] {
+        pub enum Request {
             $($function { $($field: $field_type),* }),*
         }
 
+        #[allow(non_camel_case_types)]
         #[derive(serde::Serialize, serde::Deserialize)]
-        pub enum [<$service Response>] {
+        pub enum Response {
             _Error { message: String },
             $($function($response)),*
         }
 
 
-        #[allow(async_fn_in_trait)]
-        pub trait [<$service Handler>]
+
+
+        pub async fn server<C>(handler: impl Handler, mut channel: C) -> Result<(), $crate::Error>
+        where
+        C: $crate::Channel<
+            In = Response,
+            Out = Request,
+        >
         {
-            $(
-                fn [<$function:snake>](&self, $($field: $field_type),*) -> $crate::rpc::RpcResult<$response>;
-            )*
+            loop {
+                match channel.recv().await? {
+                    $(Request::$function { $($field),* } => {
+                        let ret = handler.$function($($field),*);
 
-            async fn serve<C>(&mut self, mut channel: C) -> Result<(), $crate::Error>
-            where
-                C: $crate::Channel<
-                    In = [<$service Response>],
-                    Out = [<$service Request>],
-                >
-                {
-                    loop {
-                        match channel.recv().await? {
-                            $([<$service Request>]::$function { $($field),* } => {
-                                let ret = self.[<$function:snake>]($($field),*);
+                        let response = match ret {
+                            Ok(value) => Response::$function(value),
+                            Err(e) => Response::_Error { message: e.message },
+                        };
 
-                                let response = match ret {
-                                    Ok(value) => [<$service Response>]::$function(value),
-                                    Err(e) => [<$service Response>]::_Error { message: e.message },
-                                };
-
-                                channel.send( response ).await?;
-                            }),*
-                        }
-                    }
+                        channel.send( response ).await?;
+                    }),*
                 }
+            }
         }
 
 
-        pub struct $service<C>(C);
+        pub struct Client<C>(C);
 
-        impl<C> $service<C>
+        impl<C> Client<C>
         where
             C: $crate::Channel<
-                In = [<$service Request>],
-                Out = [<$service Response>],
+                In = Request,
+                Out = Response,
             >
         {
-            pub fn bind(channel: C) -> Self {
-                Self(channel)
-            }
-
-            $(pub async fn [<$function:snake>](
+            $(pub async fn $function(
                 &mut self, $($field: $field_type),*
             ) -> Result<$response, $crate::rpc::ClientError> {
-                let request = [<$service Request>]::$function { $($field),* };
+                let request = Request::$function { $($field),* };
 
                 self.0.send(request).await?;
 
                 match self.0.recv().await? {
                     // Ok
-                    [<$service Response>]::$function(ret) => Ok(ret),
+                    Response::$function(ret) => Ok(ret),
 
                     // Remote function failed
-                    [<$service Response>]::_Error { message } => Err($crate::rpc::ClientError::FunctionError { message }),
+                    Response::_Error { message } => Err($crate::rpc::ClientError::FunctionError { message }),
 
                     // Invalid response
                     _ => Err($crate::Error::Other {
@@ -89,6 +92,14 @@ macro_rules! define_rpc {
                 }
             })*
         }
+
+        pub fn client<C>(channel: C) -> Client<C>
+        where
+        C: $crate::Channel<
+            In = Request,
+            Out = Response,
+        >
+        { Client(channel) }
     }};
 }
 
