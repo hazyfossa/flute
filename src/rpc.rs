@@ -11,12 +11,13 @@ macro_rules! define_rpc {
     #[allow(non_snake_case)]
     $vis mod $service {
         use super::*;
+        use $crate::rpc::*;
 
         #[allow(async_fn_in_trait)]
         pub trait Handler
         {
             $(
-                fn $function(&self, $($field: $field_type),*) -> $crate::rpc::RpcResult<$response>;
+                fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
             )*
         }
 
@@ -33,7 +34,7 @@ macro_rules! define_rpc {
             $($function($response)),*
         }
 
-        pub async fn server<C>(handler: impl Handler, mut channel: C) -> Result<(), $crate::Error>
+        pub async fn server<C>(handler: impl Handler, mut channel: C) -> Result<(), $crate::ChannelError>
         where
         C: $crate::Channel<
             In = Response,
@@ -68,26 +69,17 @@ macro_rules! define_rpc {
         {
             $(pub async fn $function(
                 &mut self, $($field: $field_type),*
-            ) -> Result<$response, $crate::rpc::ClientError> {
+            ) -> Result<$response, ClientError> {
                 let request = Request::$function { $($field),* };
 
                 self.0.send(request).await?;
 
                 match self.0.recv().await? {
-                    // Ok
                     Response::$function(ret) => Ok(ret),
 
-                    // Remote function failed
-                    Response::_Error { message } => Err($crate::rpc::ClientError::FunctionError { message }),
+                    Response::_Error { message } => Err(ClientError::FunctionError { message }),
 
-                    // Invalid response
-                    _ => Err($crate::Error::Other {
-                        // TODO: we cannot print other here, as that forces Debug
-                        // work around by codegen per field? Adds bloat...
-                        message: format!("got invalid response for {}", stringify!($function)),
-                        source: None
-                    }.into()
-                    )
+                    _ => Err(ClientError::ProtocolError { expected: stringify!($function) })
                 }
             })*
         }
@@ -118,9 +110,17 @@ pub type RpcResult<T> = std::result::Result<T, RpcErrorHatch>;
 
 #[derive(Debug, Snafu)]
 pub enum ClientError {
-    #[snafu(transparent)]
-    ChannelError { source: crate::Error },
+    #[snafu(context(false))]
+    #[snafu(display("channel error"))]
+    ChannelError { source: crate::ChannelError },
 
     #[snafu(display("{message}"))]
     FunctionError { message: String },
+
+    #[snafu(display("got invalid response for {expected}"))]
+    ProtocolError {
+        expected: &'static str,
+        // TODO
+        // got: String,
+    },
 }

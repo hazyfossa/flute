@@ -1,4 +1,4 @@
-pub use crate::{Error, Rx, Tx};
+pub use crate::{ChannelError, Rx, Tx};
 
 pub mod split {
     // TODO: generic split via BiLock
@@ -37,7 +37,7 @@ pub mod merge {
     impl<T: Tx, U> Tx for Merged<T, U> {
         type In = T::In;
 
-        fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
+        fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), ChannelError>> {
             self.tx.send(data)
         }
     }
@@ -45,7 +45,7 @@ pub mod merge {
     impl<T: Rx, U> Rx for Merged<U, T> {
         type Out = T::Out;
 
-        fn recv(&mut self) -> impl Future<Output = Result<Self::Out, Error>> {
+        fn recv(&mut self) -> impl Future<Output = Result<Self::Out, ChannelError>> {
             self.rx.recv()
         }
     }

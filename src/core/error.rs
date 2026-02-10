@@ -12,7 +12,7 @@ pub trait ErrorProvider<Error = AnyError> {
         type_name::<Self>()
     }
 }
-trait_alias!(pub trait Typed: std::error::Error + Send + 'static);
+trait_alias!(pub trait Typed: std::error::Error + Send + Sync + 'static);
 
 impl snafu::AsErrorSource for Box<dyn Typed> {
     fn as_error_source(&self) -> &(dyn std::error::Error + 'static) {

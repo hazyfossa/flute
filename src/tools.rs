@@ -22,6 +22,45 @@ pub mod in_memory {
     }
 }
 
+pub mod error_wrap {
+    use crate::{error, transform::TransformRx};
+    use std::marker::PhantomData;
+
+    use crate::{error::ErrorProvider, transform::TransformFraming};
+
+    pub struct Fallible<T, E>(PhantomData<(T, E)>);
+    pub fn fallible<T, E>() -> Fallible<T, E> {
+        Fallible(PhantomData)
+    }
+
+    impl<T, E: error::Typed> ErrorProvider for Fallible<T, E> {
+        type Error = E;
+    }
+
+    // TODO: this is unintuitive, i feel like In/Out here should be swapped
+    // but our transform trait disagrees
+    impl<T, E: error::Typed> TransformFraming for Fallible<T, E> {
+        type In = T;
+        type Out = Result<T, E>;
+    }
+
+    impl<T, E: error::Typed> TransformRx for Fallible<T, E> {
+        fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
+            Ok(data?)
+        }
+    }
+}
+
+// pub mod split_any {
+//     pub struct BiLockedTx<T> {
+//         inner: T,
+//     }
+
+//     pub struct BiLockedRx<T> {
+//         inner: T,
+//     }
+// }
+
 // NOTE: blocked on v3 (unframed streams, substrates)
 
 // pub mod batching {

@@ -29,7 +29,7 @@ where
 {
     type In = T::In;
 
-    async fn send(&mut self, data: T::In) -> Result<(), Error> {
+    async fn send(&mut self, data: T::In) -> Result<(), ChannelError> {
         let transformed = self
             .transform
             .encode(data)
@@ -47,7 +47,7 @@ where
 {
     type In = I::In;
 
-    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), Error>> {
+    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), ChannelError>> {
         self.inner.send(data)
     }
 }
@@ -59,7 +59,7 @@ where
     I: Rx<Out = T::Out>,
 {
     type Out = T::In;
-    async fn recv(&mut self) -> Result<T::In, Error> {
+    async fn recv(&mut self) -> Result<T::In, ChannelError> {
         let data = self.inner.recv().await?;
 
         let transformed = self
@@ -79,7 +79,7 @@ where
 {
     type Out = I::Out;
 
-    fn recv(&mut self) -> impl Future<Output = Result<Self::Out, Error>> {
+    fn recv(&mut self) -> impl Future<Output = Result<Self::Out, ChannelError>> {
         self.inner.recv()
     }
 }

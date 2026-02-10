@@ -7,7 +7,7 @@ pub mod futures {
         stream::{SplitSink, SplitStream},
     };
 
-    use crate::{Error, Rx, Tx, ops::split};
+    use crate::{ChannelError, Rx, Tx, ops::split};
 
     struct Adapter<T, Wire> {
         inner: T,
@@ -26,10 +26,10 @@ pub mod futures {
 
     impl<Wire, T: Sink<Wire> + Unpin> Tx for Adapter<T, Wire>
     where
-        Error: From<T::Error>,
+        ChannelError: From<T::Error>,
     {
         type In = Wire;
-        async fn send(&mut self, data: Wire) -> Result<(), Error> {
+        async fn send(&mut self, data: Wire) -> Result<(), ChannelError> {
             Ok(self.inner.send(data).await?)
         }
     }
@@ -37,10 +37,10 @@ pub mod futures {
     impl<T: Stream + Unpin> Rx for Adapter<T, T::Item> {
         type Out = T::Item;
 
-        async fn recv(&mut self) -> Result<T::Item, Error> {
+        async fn recv(&mut self) -> Result<T::Item, ChannelError> {
             match self.inner.next().await {
                 Some(data) => Ok(data),
-                None => Err(Error::Closed),
+                None => Err(ChannelError::Closed),
             }
         }
     }
@@ -48,7 +48,7 @@ pub mod futures {
     impl<Wire, T> split::Split for Adapter<T, Wire>
     where
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
-        Error: From<T::Error>,
+        ChannelError: From<T::Error>,
     {
         type Rx = Adapter<SplitStream<T>, Wire>;
         type Tx = Adapter<SplitSink<T, Wire>, Wire>;
@@ -64,23 +64,25 @@ pub mod futures {
 pub mod kanal {
     use kanal::{AsyncReceiver, AsyncSender};
 
-    use crate::{Error, Rx, Tx, ops::merge};
+    use crate::{ChannelError, Rx, Tx, ops::merge};
 
     impl<T> Tx for AsyncSender<T> {
         type In = T;
 
-        async fn send(&mut self, data: T) -> Result<(), Error> {
+        async fn send(&mut self, data: T) -> Result<(), ChannelError> {
             AsyncSender::send(self, data)
                 .await
-                .map_err(|_| Error::Closed)
+                .map_err(|_| ChannelError::Closed)
         }
     }
 
     impl<T> Rx for AsyncReceiver<T> {
         type Out = T;
 
-        async fn recv(&mut self) -> Result<T, Error> {
-            AsyncReceiver::recv(self).await.map_err(|_| Error::Closed)
+        async fn recv(&mut self) -> Result<T, ChannelError> {
+            AsyncReceiver::recv(self)
+                .await
+                .map_err(|_| ChannelError::Closed)
         }
     }
 

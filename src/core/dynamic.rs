@@ -4,14 +4,14 @@
 
 use std::pin::Pin;
 
-use crate::{Channel, Error, Rx, Tx, ops::split::Split};
+use crate::{Channel, ChannelError, Rx, Tx, ops::split::Split};
 
 trait BoxedTx {
     type In;
     fn send_dyn<'life0, 'a>(
         &'life0 mut self,
         data: Self::In,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = Result<(), ChannelError>> + 'a>>
     where
         'life0: 'a,
         Self: 'a;
@@ -22,7 +22,7 @@ impl<T: Tx> BoxedTx for T {
     fn send_dyn<'life0, 'a>(
         &'life0 mut self,
         data: T::In,
-    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = Result<(), ChannelError>> + 'a>>
     where
         'life0: 'a,
         Self: 'a,
@@ -35,7 +35,7 @@ trait BoxedRx {
     type Out;
     fn recv_dyn<'life0, 'a>(
         &'life0 mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<Self::Out, Error>> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = Result<Self::Out, ChannelError>> + 'a>>
     where
         'life0: 'a,
         Self: 'a;
@@ -45,7 +45,7 @@ impl<T: Rx> BoxedRx for T {
     type Out = T::Out;
     fn recv_dyn<'life0, 'a>(
         &'life0 mut self,
-    ) -> Pin<Box<dyn Future<Output = Result<T::Out, Error>> + 'a>>
+    ) -> Pin<Box<dyn Future<Output = Result<T::Out, ChannelError>> + 'a>>
     where
         'life0: 'a,
         Self: 'a,

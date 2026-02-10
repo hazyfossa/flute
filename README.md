@@ -5,14 +5,14 @@ Flute is a utility crate for defining bi-directional channels and RPC interfaces
 # todo
 - [ ] Documentation
 - [x] Examples
-- [x] Better error handling (snafu)
+- [ ] Better error handling
 - [ ] Tracing integration
 - [x] Futures Stream+Sink compat
 - [x] Dynamic channels
-- [ ] In-band error handling (fallible RPC)
+- [x] In-band error handling (fallible RPC)
+- [ ] Defmt support for in-band errors
 
 V2:
-- [ ] Easier transform / channel definition
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing
