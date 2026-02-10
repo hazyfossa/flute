@@ -13,14 +13,15 @@ pub trait ErrorProvider<Error = AnyError> {
     }
 }
 trait_alias!(pub trait Typed: std::error::Error + Send + Sync + 'static);
+pub type BoxedErr = Box<dyn Typed + 'static>;
 
-impl snafu::AsErrorSource for Box<dyn Typed> {
+impl snafu::AsErrorSource for BoxedErr {
     fn as_error_source(&self) -> &(dyn std::error::Error + 'static) {
         self.as_ref()
     }
 }
 
-impl<T: Typed> From<T> for Box<dyn Typed> {
+impl<T: Typed> From<T> for BoxedErr {
     fn from(value: T) -> Self {
         Box::new(value)
     }
