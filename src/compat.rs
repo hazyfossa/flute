@@ -1,6 +1,6 @@
 #[cfg(feature = "futures")]
 pub mod futures {
-    use std::marker::PhantomData;
+    use std::{marker::PhantomData, pin::Pin};
 
     use futures_util::{
         SinkExt as Sink, StreamExt as Stream,
@@ -9,22 +9,22 @@ pub mod futures {
 
     use crate::{ChannelError, Rx, Tx, ops::split};
 
-    struct Adapter<T, Wire> {
-        inner: T,
+    pub struct Adapter<T, Wire> {
+        // TODO: do not Box
+        inner: Pin<Box<T>>,
         // TODO: is there really no way
         // to bridge sink without this?
         _wire: PhantomData<Wire>,
     }
 
-    #[allow(private_interfaces)]
     pub fn adapt<Fut, Wire>(future: Fut) -> Adapter<Fut, Wire> {
         Adapter {
-            inner: future,
+            inner: Box::pin(future),
             _wire: PhantomData,
         }
     }
 
-    impl<Wire, T: Sink<Wire> + Unpin> Tx for Adapter<T, Wire>
+    impl<Wire, T: Sink<Wire>> Tx for Adapter<T, Wire>
     where
         ChannelError: From<T::Error>,
     {
@@ -34,7 +34,7 @@ pub mod futures {
         }
     }
 
-    impl<T: Stream + Unpin> Rx for Adapter<T, T::Item> {
+    impl<T: Stream> Rx for Adapter<T, T::Item> {
         type Out = T::Item;
 
         async fn recv(&mut self) -> Result<T::Item, ChannelError> {
@@ -50,8 +50,8 @@ pub mod futures {
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
         ChannelError: From<T::Error>,
     {
-        type Rx = Adapter<SplitStream<T>, Wire>;
-        type Tx = Adapter<SplitSink<T, Wire>, Wire>;
+        type Rx = Adapter<SplitStream<Pin<Box<T>>>, Wire>;
+        type Tx = Adapter<SplitSink<Pin<Box<T>>, Wire>, Wire>;
 
         fn split(self) -> (Self::Tx, Self::Rx) {
             let (tx, rx) = self.inner.split();
