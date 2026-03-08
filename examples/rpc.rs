@@ -7,7 +7,7 @@ use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
 // - Server definition boilerplate
 // - Request/Response as complete enum types
 define_rpc!(Simple {
-    fn echo(something: String) -> String,
+    fn echo(something: String) -> String;
 });
 
 // To define a server, implement the Handler trait.

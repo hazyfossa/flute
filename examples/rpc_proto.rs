@@ -8,7 +8,7 @@ use flute::{
 };
 
 define_rpc!(Simple {
-    fn echo(something: String) -> String,
+    fn echo(something: String) -> String;
 });
 
 pub async fn setup_server(

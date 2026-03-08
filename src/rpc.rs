@@ -12,7 +12,7 @@ use crate::{
 #[macro_export]
 macro_rules! define_rpc {
     ($vis:vis $service:ident {
-        $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty),* $(,)?
+        $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty;)*
     }) => {
 
     #[allow(non_snake_case)]
