@@ -23,7 +23,8 @@ impl Simple::Handler for Server {
     }
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // This creates an in-memory channel pair, suitable for in-process communcation
     let (client_channel, server_channel) =
         in_memory::unbounded_pair::<Simple::Request, Simple::Response>();
@@ -33,15 +34,13 @@ fn main() {
 
     // Server is just a future that enters a loop.
     // You can make it a background task, join with other futures, etc.
-    // Flute is in no way dependent on smol, you can use any other runtime!
-    smol::spawn(server).detach();
+    // And flute is in no way dependent on tokio, you can use any other runtime!
+    let _ = tokio::spawn(server).await;
 
     // Here we execute both sides simultaneously
     // In a real-world application, these two parts can be in two different binaries
     // both of which depend on a "service-definition" crate containing the define_rpc!
-    smol::block_on(async {
-        let mut client = Simple::client(client_channel);
-        let a = client.echo("Hello".into()).await.unwrap();
-        println!("{a}, world!")
-    });
+    let mut client = Simple::client(client_channel);
+    let a = client.echo("Hello".into()).await.unwrap();
+    println!("{a}, world!")
 }
