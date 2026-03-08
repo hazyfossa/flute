@@ -1,6 +1,9 @@
 // This is an example showcasing a REST-like API with flute and axum.
 // The same approach should be applicable to many other http frameworks.
 //
+// If client-side is written in wasm, use YourService::client(flute::compat::wasm::FetchJson)
+// to achieve similar ergonomics to leptos/dioxus server functions.
+//
 // Note that this is not truly REST, since it uses flute's in-band errors
 // and schema instead of http status codes and OpenAPI.
 //

@@ -13,8 +13,6 @@ pub mod futures {
     pub struct Adapter<T, Wire> {
         // TODO: do not Box
         inner: Pin<Box<T>>,
-        // TODO: is there really no way
-        // to bridge sink without this?
         _wire: PhantomData<Wire>,
     }
 
@@ -173,11 +171,23 @@ pub mod postcard {
 
 #[cfg(feature = "wasm")]
 pub mod wasm {
-    use gloo_net::http::{Method, RequestBuilder};
+    use std::any::type_name_of_val;
+
+    use gloo_net::{
+        http::{Method, RequestBuilder},
+        websocket,
+    };
     use serde::{Serialize, de::DeserializeOwned};
     use snafu::{ResultExt, Snafu, ensure};
 
-    use crate::{error::ErrorProvider, rpc::Caller};
+    use crate::{
+        compat::futures,
+        error::ErrorProvider,
+        rpc::Caller,
+        transform::{TransformFraming, TransformRx, TransformTx},
+    };
+
+    // Fetch
 
     #[derive(Debug, Snafu)]
     pub enum FetchError {
@@ -241,4 +251,50 @@ pub mod wasm {
             Ok(response)
         }
     }
+
+    // WebSocket
+    pub type WebSocket = futures::Adapter<websocket::futures::WebSocket, websocket::Message>;
+
+    #[derive(Debug, Snafu)]
+    #[snafu(display("invalid type of websocket message: expected {expected}, got {got}"))]
+    pub struct WebsocketSelectError {
+        expected: &'static str,
+        got: &'static str,
+    }
+
+    macro_rules! ws_select_impl {
+        ($name:ident ($ty:ty => $selector:ident)) => {
+            pub struct $name;
+
+            impl ErrorProvider for $name {
+                type Error = WebsocketSelectError;
+            }
+
+            impl TransformFraming for $name {
+                type In = websocket::Message;
+                type Out = $ty;
+            }
+
+            impl TransformRx for $name {
+                fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
+                    Ok(websocket::Message::$selector(data))
+                }
+            }
+
+            impl TransformTx for $name {
+                fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
+                    match data {
+                        websocket::Message::$selector(correct) => Ok(correct),
+                        ref other => Err(WebsocketSelectError {
+                            expected: stringify!($ty),
+                            got: type_name_of_val(other),
+                        }),
+                    }
+                }
+            }
+        };
+    }
+
+    ws_select_impl!(WebsocketSelectString (String => Text) );
+    ws_select_impl!(WebsocketSelectBytes ( Vec<u8> => Bytes) );
 }
