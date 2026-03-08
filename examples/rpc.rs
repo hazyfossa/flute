@@ -8,18 +8,32 @@ use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
 // - Request/Response as complete enum types
 define_rpc!(Simple {
     fn echo(something: String) -> String;
+
+    // Note that you must always specify an explicit return type.
+    // If your function does not return anything, specify "-> ()"
+    //
+    // This reflects on the fact that even for empty return bodies,
+    // an acknowledgement and (optionally) an in-band error will be transmitted.
+    fn empty() -> ();
 });
 
 // To define a server, implement the Handler trait.
 struct Server;
 impl Simple::Handler for Server {
     // All RPC functions are fallible by default.
-    // RpcResult will convert any error to a string via Display, then send it on the wire.
-    // Note that this may drop context of the error.
+    // This means that a handler always has an option to return an error.
+    // You should always return an error instead of panicking or unwrapping (where possible).
+    //
+    // RpcResult will convert any error to a string via Debug, then send it on the wire.
     //
     // This is expected to change once we finalize our error handling scheme.
     fn echo(&self, something: String) -> RpcResult<String> {
         Ok(something)
+    }
+
+    fn empty(&self) -> RpcResult<()> {
+        // The error will still be transmitted
+        Err("this function is empty")?
     }
 }
 

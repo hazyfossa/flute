@@ -1,7 +1,11 @@
 // This is an example showcasing a REST-like API with flute and axum.
 // The same approach should be applicable to many other http frameworks.
 //
-// If client-side is written in wasm, use YourService::client(flute::compat::wasm::FetchJson)
+// If client-side is written in wasm, use
+/// ```
+/// let fetch = flute::compat::wasm::FetchJson::new(url);
+/// let client = YourService::client(fetch)
+/// ```
 // to achieve similar ergonomics to leptos/dioxus server functions.
 //
 // Note that this is not truly REST, since it uses flute's in-band errors
@@ -12,7 +16,6 @@
 // you can also serve flute natively, over channels backed by hyper.
 
 // TODO: example of flute channels over hyper
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -24,8 +27,8 @@ use flute::rpc::RpcResult;
 use crate::Service::Handler;
 
 flute::define_rpc!(Service {
-    fn get(key: String) -> Option<String>,
-    fn set(key: String, value: String) -> (),
+    fn get(key: String) -> Option<String>;
+    fn set(key: String, value: String) -> ();
 });
 
 #[derive(Clone)]
