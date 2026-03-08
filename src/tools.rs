@@ -46,7 +46,8 @@ pub mod error_wrap {
 
     impl<T, E: error::Typed> TransformRx for Fallible<T, E> {
         fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
-            Ok(data?)
+            let inner = data?;
+            Ok(inner)
         }
     }
 }

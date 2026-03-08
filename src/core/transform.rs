@@ -35,7 +35,7 @@ where
             .encode(data)
             .whatever_context(format!("{} transform error", type_name::<T>()))?;
 
-        Ok(self.inner.send(transformed).await?)
+        self.inner.send(transformed).await
     }
 }
 

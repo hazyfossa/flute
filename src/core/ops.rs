@@ -65,7 +65,7 @@ pub mod cross {
     #[allow(type_alias_bounds)]
     pub type Crossed<A: Split, B: Split> = Merged<A::Tx, B::Rx>;
 
-    pub fn cross<'a, A, B>(a: A, b: B) -> (Crossed<A, B>, Crossed<B, A>)
+    pub fn cross<A, B>(a: A, b: B) -> (Crossed<A, B>, Crossed<B, A>)
     where
         A: Split,
         B: Split,
