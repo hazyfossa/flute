@@ -42,7 +42,6 @@ where
 // If TX == false, passthrough tx
 impl<T, I, const ANY: bool> Tx for Transformed<T, I, false, ANY>
 where
-    T: TransformTx,
     I: Tx,
 {
     type In = I::In;
@@ -74,7 +73,6 @@ where
 // If RX == false, passthrough rx
 impl<T, I, const ANY: bool> Rx for Transformed<T, I, ANY, false>
 where
-    T: TransformTx,
     I: Rx,
 {
     type Out = I::Out;

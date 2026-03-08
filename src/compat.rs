@@ -3,7 +3,7 @@ pub mod futures {
     use std::{marker::PhantomData, pin::Pin};
 
     use futures_util::{
-        SinkExt as Sink, StreamExt as Stream,
+        Sink, SinkExt, Stream, StreamExt,
         stream::{SplitSink, SplitStream},
     };
     use snafu::ResultExt;
@@ -33,7 +33,9 @@ pub mod futures {
         }
     }
 
-    impl<T: Stream> Rx for Adapter<T, T::Item> {
+    // NOTE: Wire may be different from T::Item if stream is fallible.
+    // use tools::error_flatten to deal with this
+    impl<T: Stream, Wire> Rx for Adapter<T, Wire> {
         type Out = T::Item;
 
         async fn recv(&mut self) -> Result<T::Item, ChannelError> {
@@ -175,16 +177,18 @@ pub mod wasm {
 
     use gloo_net::{
         http::{Method, RequestBuilder},
-        websocket,
+        websocket::{self, WebSocketError, futures::WebSocket as WebSocketRaw},
     };
     use serde::{Serialize, de::DeserializeOwned};
     use snafu::{ResultExt, Snafu, ensure};
 
     use crate::{
-        compat::futures,
+        Wire,
+        compat::futures::adapt,
         error::ErrorProvider,
         rpc::Caller,
-        transform::{TransformFraming, TransformRx, TransformTx},
+        tools::error_wrap::fallible,
+        transform::{TransformExt, TransformFraming, TransformRx, TransformTx},
     };
 
     // Fetch
@@ -253,7 +257,27 @@ pub mod wasm {
     }
 
     // WebSocket
-    pub type WebSocket = futures::Adapter<websocket::futures::WebSocket, websocket::Message>;
+
+    fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
+        // TODO: this really should be a specialization of adapt()
+        adapt(raw).transform_rx(fallible::<websocket::Message, WebSocketError>())
+    }
+
+    pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+        // TODO: i really don't know why gloo doesn't do this error map internally
+        let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
+        Ok(websocket_wrap(js_bind))
+    }
+
+    pub fn websocket_open_with_protocol(
+        url: &str,
+        protocol: &str,
+    ) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+        let js_bind = WebSocketRaw::open_with_protocol(url, protocol)
+            .map_err(|e| gloo_net::Error::JsError(e))?;
+
+        Ok(websocket_wrap(js_bind))
+    }
 
     #[derive(Debug, Snafu)]
     #[snafu(display("invalid type of websocket message: expected {expected}, got {got}"))]
@@ -263,8 +287,8 @@ pub mod wasm {
     }
 
     macro_rules! ws_select_impl {
-        ($name:ident ($ty:ty => $selector:ident)) => {
-            pub struct $name;
+        ($vis:vis $name:ident ($ty:ty => $selector:ident)) => {
+            $vis struct $name;
 
             impl ErrorProvider for $name {
                 type Error = WebsocketSelectError;
@@ -295,6 +319,6 @@ pub mod wasm {
         };
     }
 
-    ws_select_impl!(WebsocketSelectString (String => Text) );
-    ws_select_impl!(WebsocketSelectBytes ( Vec<u8> => Bytes) );
+    ws_select_impl!(pub WebsocketSelectString (String => Text) );
+    ws_select_impl!(pub WebsocketSelectBytes ( Vec<u8> => Bytes) );
 }
