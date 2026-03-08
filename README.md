@@ -20,8 +20,7 @@ V2:
 - [ ] Channel priorities
 
 V3:
--- completion-based io primitives
--- (proper work on performance delayed until this)
+- [ ] completion-based io primitives (proper work on performance delayed until this)
 
 # Non-goals
 - Defining our own transport

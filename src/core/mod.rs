@@ -1,6 +1,6 @@
 #![allow(async_fn_in_trait)]
 
-use crate::error::Typed;
+use crate::error::{ErrorProvider, Typed};
 
 pub mod dynamic;
 pub mod error;
@@ -33,6 +33,13 @@ pub enum ChannelError {
 // TODO: docs on trait_alias
 // A channel is a combination of a Receiver and Transmitter
 crate::trait_alias!(pub trait Channel: Tx + Rx);
+
+impl<T> ErrorProvider for T
+where
+    T: Channel,
+{
+    type Error = ChannelError;
+}
 
 /// A wire is a channel, for which input and output are the same
 pub trait Wire<T>: Channel<In = T, Out = T> {}
