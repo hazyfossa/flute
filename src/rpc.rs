@@ -76,11 +76,7 @@ macro_rules! define_rpc {
         pub struct Client<C>(C);
 
         impl<C> Client<C>
-        where
-            C: Caller<
-                Request = Request,
-                Response = Response,
-            >
+        where C: Caller<Request, Response>
         {
             $(pub async fn $function(
                 &mut self, $($field: $field_type),*
@@ -100,11 +96,7 @@ macro_rules! define_rpc {
         }
 
         pub fn client<C>(channel: C) -> Client<C>
-        where
-        C: Caller<
-            Request = Request,
-            Response = Response,
-        >
+        where C: Caller<Request, Response>
         { Client(channel) }
     }};
 }
@@ -140,21 +132,15 @@ pub enum ClientError {
 }
 
 #[allow(async_fn_in_trait)]
-pub trait Caller: ErrorProvider {
-    type Request;
-    type Response;
-
-    async fn call(&mut self, request: Self::Request) -> Result<Self::Response, Self::Error>;
+pub trait Caller<Request, Response>: ErrorProvider {
+    async fn call(&mut self, request: Request) -> Result<Response, Self::Error>;
 }
 
-impl<T> Caller for T
+impl<T> Caller<T::In, T::Out> for T
 where
     T: Channel,
 {
-    type Request = T::In;
-    type Response = T::Out;
-
-    async fn call(&mut self, request: Self::Request) -> Result<Self::Response, Self::Error> {
+    async fn call(&mut self, request: T::In) -> Result<T::Out, Self::Error> {
         self.send(request).await?;
         self.recv().await
     }

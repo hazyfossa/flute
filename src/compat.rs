@@ -170,3 +170,75 @@ pub mod postcard {
         }
     }
 }
+
+#[cfg(feature = "wasm")]
+pub mod wasm {
+    use gloo_net::http::{Method, RequestBuilder};
+    use serde::{Serialize, de::DeserializeOwned};
+    use snafu::{ResultExt, Snafu, ensure};
+
+    use crate::{error::ErrorProvider, rpc::Caller};
+
+    #[derive(Debug, Snafu)]
+    pub enum FetchError {
+        #[snafu(context(false))]
+        SendError { source: gloo_net::Error },
+        #[snafu(context(false))]
+        DataFormatError { source: serde_json::Error },
+        #[snafu(display("cannot parse response body as string"))]
+        BodyParseError { source: gloo_net::Error },
+        #[snafu(display("[{status}]: {body}"))]
+        HttpApiError { status: u16, body: String },
+    }
+
+    pub struct FetchJson {
+        url: String,
+        method: Method,
+    }
+
+    impl FetchJson {
+        pub fn new(url: String) -> Self {
+            Self {
+                url,
+                method: Method::GET,
+            }
+        }
+
+        pub fn new_with_method(url: String, method: Method) -> Self {
+            Self { url, method }
+        }
+    }
+
+    impl ErrorProvider for FetchJson {
+        type Error = FetchError;
+    }
+
+    impl<Request, Response> Caller<Request, Response> for FetchJson
+    where
+        Request: Serialize,
+        Response: DeserializeOwned,
+    {
+        async fn call(&mut self, request: Request) -> Result<Response, Self::Error> {
+            let body = serde_json::to_string(&request)?;
+
+            let ret = RequestBuilder::new(&self.url)
+                .method(self.method.clone())
+                .body(body)?
+                .send()
+                .await?;
+
+            let body = ret.text().await.context(BodyParseSnafu)?;
+
+            ensure!(
+                ret.ok(),
+                HttpApiSnafu {
+                    status: ret.status(),
+                    body,
+                }
+            );
+
+            let response = serde_json::from_str(&body)?;
+            Ok(response)
+        }
+    }
+}
