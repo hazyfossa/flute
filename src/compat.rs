@@ -1,6 +1,6 @@
 #[cfg(feature = "futures")]
 pub mod futures {
-    use std::{marker::PhantomData, pin::Pin};
+    use std::marker::PhantomData;
 
     use futures_util::{
         Sink, SinkExt, Stream, StreamExt,
@@ -12,18 +12,18 @@ pub mod futures {
 
     pub struct Adapter<T, Wire> {
         // TODO: do not Box
-        inner: Pin<Box<T>>,
+        inner: T,
         _wire: PhantomData<Wire>,
     }
 
     pub fn adapt<Fut, Wire>(future: Fut) -> Adapter<Fut, Wire> {
         Adapter {
-            inner: Box::pin(future),
+            inner: future,
             _wire: PhantomData,
         }
     }
 
-    impl<Wire, T: Sink<Wire>> Tx for Adapter<T, Wire>
+    impl<Wire, T: Sink<Wire> + Unpin> Tx for Adapter<T, Wire>
     where
         T::Error: Into<BoxedErr>,
     {
@@ -35,7 +35,7 @@ pub mod futures {
 
     // NOTE: Wire may be different from T::Item if stream is fallible.
     // use tools::error_flatten to deal with this
-    impl<T: Stream, Wire> Rx for Adapter<T, Wire> {
+    impl<T: Stream + Unpin, Wire> Rx for Adapter<T, Wire> {
         type Out = T::Item;
 
         async fn recv(&mut self) -> Result<T::Item, ChannelError> {
@@ -51,8 +51,8 @@ pub mod futures {
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
         T::Error: Into<BoxedErr>,
     {
-        type Rx = Adapter<SplitStream<Pin<Box<T>>>, Wire>;
-        type Tx = Adapter<SplitSink<Pin<Box<T>>, Wire>, Wire>;
+        type Rx = Adapter<SplitStream<T>, Wire>;
+        type Tx = Adapter<SplitSink<T, Wire>, Wire>;
 
         fn split(self) -> (Self::Tx, Self::Rx) {
             let (tx, rx) = self.inner.split();
