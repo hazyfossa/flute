@@ -1,0 +1,30 @@
+use flute::{define_rpc, rpc::RpcResult};
+
+define_rpc!(
+    pub Service {
+        fn echo(something: String) -> String;
+        fn complex(input: (u64, u64)) -> u128;
+    }
+);
+
+struct CommonState {}
+
+impl Service::split_handler::complex for CommonState {
+    fn handle(&self, input: (u64, u64)) -> RpcResult<u128> {
+        // Pretend this is a very long function definition
+        Ok((input.0 + input.1) as _)
+    }
+}
+
+impl Service::split_handler::echo for CommonState {
+    fn handle(&self, something: String) -> RpcResult<String> {
+        Ok(something)
+    }
+}
+
+fn typecheck(_handler: impl Service::Handler) {}
+
+fn main() {
+    // Hints will be provided for what functions are left to implement
+    typecheck(CommonState {});
+}

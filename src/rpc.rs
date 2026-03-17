@@ -11,11 +11,14 @@ use crate::{
 
 #[macro_export]
 macro_rules! define_rpc {
-    ($vis:vis $service:ident {
-        $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty;)*
-    }) => {
+    (
+        $vis:vis $service:ident {
+            $(fn $function:ident ( $($field:ident: $field_type:ty),* ) -> $response:ty;)*
+        }
+    ) => {
 
     #[allow(non_snake_case)]
+    #[allow(non_camel_case_types)]
     $vis mod $service {
         use super::*;
         use $crate::rpc::*;
@@ -45,13 +48,24 @@ macro_rules! define_rpc {
             }
         }
 
-        #[allow(non_camel_case_types)]
+        // TODO: toggle
+        pub mod split_handler {
+            $(pub trait $function {
+                fn handle(&self, $($field: $field_type),*) -> super::RpcResult<$response>;
+            })*
+
+            impl<T> super::Handler for T where T: $($function +)* {
+                $(fn $function(&self, $($field: $field_type),*) -> super::RpcResult<$response> {
+                    <Self as $function>::handle(self, $($field),*)
+                })*
+            }
+        }
+
         #[derive(serde::Serialize, serde::Deserialize)]
         pub enum Request {
             $($function { $($field: $field_type),* }),*
         }
 
-        #[allow(non_camel_case_types)]
         #[derive(serde::Serialize, serde::Deserialize)]
         pub enum Response {
             _Error { message: String },
