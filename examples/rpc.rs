@@ -54,7 +54,7 @@ async fn main() {
     // Here we execute both sides simultaneously
     // In a real-world application, these two parts can be in two different binaries
     // both of which depend on a "service-definition" crate containing the define_rpc!
-    let mut client = Simple::client(client_channel);
+    let mut client = Simple::Client::new(client_channel);
     let a = client.echo("Hello".into()).await.unwrap();
     println!("{a}, world!")
 }

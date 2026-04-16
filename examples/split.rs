@@ -1,6 +1,7 @@
 use flute::{define_rpc, rpc::RpcResult};
 
 define_rpc!(
+    #[split_handler]
     pub Service {
         fn echo(something: String) -> String;
         fn complex(input: (u64, u64)) -> u128;
