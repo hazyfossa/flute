@@ -36,28 +36,27 @@ macro_rules! define_rpc {
             $($function($response)),*
         }
 
+        pub fn route(handler: &impl Handler, request: Request) -> Response {
+            match request {
+                $(Request::$function { $($field),* } => {
+                    let ret = handler.$function($($field),*);
+
+                    let response = match ret {
+                        Ok(value) => Response::$function(value),
+                        Err(e) => Response::_Error { message: e.message },
+                    };
+
+                    response
+                }),*
+            }
+        }
+
         #[allow(async_fn_in_trait)]
         pub trait Handler
         {
             $(
                 fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
             )*
-
-            // TODO: make it clear you don't have to implement this
-            fn handle(&self, request: Request) -> Response {
-                match request {
-                    $(Request::$function { $($field),* } => {
-                        let ret = self.$function($($field),*);
-
-                        let response = match ret {
-                            Ok(value) => Response::$function(value),
-                            Err(e) => Response::_Error { message: e.message },
-                        };
-
-                        response
-                    }),*
-                }
-            }
         }
 
 
@@ -70,8 +69,8 @@ macro_rules! define_rpc {
         {
             loop {
                 let request = channel.recv().await?;
-                let response = handler.handle(request);
-                channel.send( response ).await?;
+                let response = route(&handler, request);
+                channel.send(response).await?;
             }
         }
 
@@ -97,12 +96,16 @@ macro_rules! define_rpc {
 
                     Response::_Error { message } => Err(ClientError::FunctionError { message }),
 
-                    _ => Err(ClientError::ProtocolError { expected: stringify!($function) })
+                    other => Err(ClientError::ProtocolError {
+                        expected: stringify!($function),
+                        got: std::any::type_name_of_val(&other)
+                    })
                 }
             })*
         }
 
-        $crate::define_rpc!(@feature_select split_handler from $(#[$feat])*  => {
+        $crate::define_rpc!(@feature_select from $(#[$feat])* :
+        split_handler => {
             pub mod split_handler {
                 use super::*;
                 $(pub trait $function {
@@ -115,16 +118,19 @@ macro_rules! define_rpc {
                     })*
                 }
             }
-        });
+        }
+        );
 
 
     }};
 
     // TODO: While this is fun, seriously consider switching to proc-macros
-    (@feature_select $feature:tt from $(#[$features:tt])* => { $($body:tt)* }) => {
+    (@feature_select from $(#[$features:tt])* : $($feature:tt => { $($body:tt)* })+) => {
         $crate::define_rpc!(@scope ($s:tt) => {
             macro_rules! selector {
-                ($feature, $s(other:tt)*) => { $($body)* };
+                $(
+                    ($feature, $s(other:tt)*) => { $($body)* }
+                )+;
                 ($not_feature:tt, $s($other:tt)*) => { selector!($s($other)*); };
                 () => {}
             }
@@ -162,11 +168,10 @@ pub enum ClientError {
     #[snafu(display("{message}"))]
     FunctionError { message: String },
 
-    #[snafu(display("got invalid response for {expected}"))]
+    #[snafu(display("got invalid response: expected {expected}, got: {got}"))]
     ProtocolError {
         expected: &'static str,
-        // TODO
-        // got: String,
+        got: &'static str,
     },
 }
 

@@ -24,8 +24,6 @@ use std::{
 use axum::{Json, Router, extract, routing::get};
 use flute::rpc::RpcResult;
 
-use crate::Service::Handler;
-
 flute::define_rpc!(Service {
     fn get(key: String) -> Option<String>;
     fn set(key: String, value: String) -> ();
@@ -65,7 +63,7 @@ async fn api(
     handler: extract::State<KVHandler>,
     request: extract::Json<Service::Request>,
 ) -> Json<Service::Response> {
-    handler.handle(request.0).into()
+    Service::route(&handler.0, request.0).into()
 }
 
 #[tokio::main]

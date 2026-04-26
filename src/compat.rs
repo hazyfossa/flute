@@ -11,7 +11,6 @@ pub mod futures {
     use crate::{ChannelError, Rx, Tx, error::BoxedErr, ops::split};
 
     pub struct Adapter<T, Wire> {
-        // TODO: do not Box
         inner: T,
         _wire: PhantomData<Wire>,
     }
@@ -177,7 +176,7 @@ pub mod wasm {
 
     use gloo_net::{
         http::{Method, RequestBuilder},
-        websocket::{self, WebSocketError, futures::WebSocket as WebSocketRaw},
+        websocket::{self, futures::WebSocket as WebSocketRaw},
     };
     use serde::{Serialize, de::DeserializeOwned};
     use snafu::{ResultExt, Snafu, ensure};
@@ -259,12 +258,11 @@ pub mod wasm {
     // WebSocket
 
     fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
-        // TODO: this really should be a specialization of adapt()
-        adapt(raw).transform_rx(fallible::<websocket::Message, WebSocketError>())
+        adapt(raw).transform_rx(fallible())
     }
 
     pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
-        // TODO: i really don't know why gloo doesn't do this error map internally
+        // NOTE: i really don't know why gloo doesn't do this error map internally
         let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
         Ok(websocket_wrap(js_bind))
     }
