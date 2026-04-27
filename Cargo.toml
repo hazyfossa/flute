@@ -32,3 +32,5 @@ wasm = ["dep:gloo-net"]
 
 data-json = ["dep:serde_json"]
 data-postcard = ["dep:postcard"]
+
+unstable-split-any = ["futures", "futures-util/unstable", "futures-util/bilock"]

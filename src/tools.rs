@@ -52,15 +52,62 @@ pub mod error_wrap {
     }
 }
 
-// pub mod split_any {
-//     pub struct BiLockedTx<T> {
-//         inner: T,
-//     }
+#[cfg(feature = "unstable-split-any")]
+pub mod split_any {
+    use futures_util::lock::BiLock;
 
-//     pub struct BiLockedRx<T> {
-//         inner: T,
-//     }
-// }
+    use crate::{Channel, Rx, Tx, ops::split::Split};
+
+    pub struct BiLockedTx<T>(BiLock<T>);
+
+    impl<T: Tx + Unpin> Tx for BiLockedTx<T> {
+        type In = T::In;
+        async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
+            self.0.lock().await.as_pin_mut().get_mut().send(data).await
+        }
+    }
+
+    pub struct BiLockedRx<T>(BiLock<T>);
+
+    impl<T: Rx + Unpin> Rx for BiLockedRx<T> {
+        type Out = T::Out;
+
+        async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
+            self.0.lock().await.as_pin_mut().get_mut().recv().await
+        }
+    }
+
+    pub struct BiLocked<T>(pub T);
+
+    impl<T: Tx> Tx for BiLocked<T> {
+        type In = T::In;
+
+        fn send(
+            &mut self,
+            data: Self::In,
+        ) -> impl Future<Output = Result<(), crate::ChannelError>> {
+            self.0.send(data)
+        }
+    }
+
+    impl<T: Rx> Rx for BiLocked<T> {
+        type Out = T::Out;
+
+        fn recv(&mut self) -> impl Future<Output = Result<Self::Out, crate::ChannelError>> {
+            self.0.recv()
+        }
+    }
+
+    impl<T: Channel + Unpin> Split for BiLocked<T> {
+        type Tx = BiLockedTx<T>;
+        type Rx = BiLockedRx<T>;
+
+        fn split(self) -> (Self::Tx, Self::Rx) {
+            let (tx, rx) = BiLock::new(self.0);
+            (BiLockedTx(tx), BiLockedRx(rx))
+        }
+    }
+}
 
 // NOTE: blocked on v3 (unframed streams, substrates)
 

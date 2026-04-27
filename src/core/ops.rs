@@ -1,7 +1,6 @@
 pub use crate::{ChannelError, Rx, Tx};
 
 pub mod split {
-    // TODO: generic split via BiLock
     use crate::Channel;
 
     use super::*;
