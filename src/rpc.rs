@@ -36,10 +36,10 @@ macro_rules! define_rpc {
             $($function($response)),*
         }
 
-        pub fn route(handler: &impl Handler, request: Request) -> Response {
+        pub async fn route(handler: &impl Handler, request: Request) -> Response {
             match request {
                 $(Request::$function { $($field),* } => {
-                    let ret = handler.$function($($field),*);
+                    let ret = handler.$function($($field),*).await;
 
                     let response = match ret {
                         Ok(value) => Response::$function(value),
@@ -55,7 +55,7 @@ macro_rules! define_rpc {
         pub trait Handler
         {
             $(
-                fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
+                async fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
             )*
         }
 
@@ -69,7 +69,7 @@ macro_rules! define_rpc {
         {
             loop {
                 let request = channel.recv().await?;
-                let response = route(&handler, request);
+                let response = route(&handler, request).await;
                 channel.send(response).await?;
             }
         }
@@ -109,11 +109,11 @@ macro_rules! define_rpc {
             pub mod split_handler {
                 use super::*;
                 $(pub trait $function {
-                    fn handle(&self, $($field: $field_type),*) -> super::RpcResult<$response>;
+                    async fn handle(&self, $($field: $field_type),*) -> super::RpcResult<$response>;
                 })*
 
                 impl<T> super::Handler for T where T: $($function +)* {
-                    $(fn $function(&self, $($field: $field_type),*) -> super::RpcResult<$response> {
+                    $(fn $function(&self, $($field: $field_type),*) -> impl Future<Output = super::RpcResult<$response>> {
                         <Self as $function>::handle(self, $($field),*)
                     })*
                 }

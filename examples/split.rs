@@ -11,14 +11,14 @@ define_rpc!(
 struct CommonState {}
 
 impl Service::split_handler::complex for CommonState {
-    fn handle(&self, input: (u64, u64)) -> RpcResult<u128> {
+    async fn handle(&self, input: (u64, u64)) -> RpcResult<u128> {
         // Pretend this is a very long function definition
         Ok((input.0 + input.1) as _)
     }
 }
 
 impl Service::split_handler::echo for CommonState {
-    fn handle(&self, something: String) -> RpcResult<String> {
+    async fn handle(&self, something: String) -> RpcResult<String> {
         Ok(something)
     }
 }

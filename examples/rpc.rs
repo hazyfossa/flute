@@ -27,11 +27,11 @@ impl Simple::Handler for Server {
     // RpcResult will convert any error to a string via Debug, then send it on the wire.
     //
     // This is expected to change once we finalize our error handling scheme.
-    fn echo(&self, something: String) -> RpcResult<String> {
+    async fn echo(&self, something: String) -> RpcResult<String> {
         Ok(something)
     }
 
-    fn empty(&self) -> RpcResult<()> {
+    async fn empty(&self) -> RpcResult<()> {
         // The error will still be transmitted
         Err("this function is empty")?
     }

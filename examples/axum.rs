@@ -44,12 +44,12 @@ impl KVHandler {
 }
 
 impl Service::Handler for KVHandler {
-    fn get(&self, key: String) -> RpcResult<Option<String>> {
+    async fn get(&self, key: String) -> RpcResult<Option<String>> {
         let map = self.map.lock().unwrap();
         Ok(map.get(&key).cloned())
     }
 
-    fn set(&self, key: String, value: String) -> RpcResult<()> {
+    async fn set(&self, key: String, value: String) -> RpcResult<()> {
         let mut map = self.map.lock().unwrap();
         map.insert(key, value);
         Ok(())
@@ -63,7 +63,7 @@ async fn api(
     handler: extract::State<KVHandler>,
     request: extract::Json<Service::Request>,
 ) -> Json<Service::Response> {
-    Service::route(&handler.0, request.0).into()
+    Service::route(&handler.0, request.0).await.into()
 }
 
 #[tokio::main]
