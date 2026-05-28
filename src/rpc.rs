@@ -1,3 +1,4 @@
+#![allow(async_fn_in_trait)]
 // TODO: channel setup flow. Server/Client-tagged channels?
 
 use std::fmt::Debug;
@@ -7,7 +8,48 @@ use snafu::Snafu;
 use crate::{
     Channel,
     error::{ErrorProvider, Typed},
+    trait_alias,
 };
+
+trait_alias!(trait Data: serde::Serialize + serde::de::DeserializeOwned);
+
+#[allow(private_bounds)]
+pub trait Service {
+    type Request: Data;
+    type Response: Data;
+
+    type Client<C: Caller<Self>>: From<C>;
+}
+
+pub trait Caller<S: Service>: ErrorProvider {
+    async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error>;
+}
+
+impl<T, S> Caller<S> for T
+where
+    T: Channel,
+    S: Service<Request = T::In, Response = T::Out>,
+{
+    async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error> {
+        self.send(request).await?;
+        self.recv().await
+    }
+}
+
+pub trait Handler<S: Service + ?Sized> {
+    async fn handle(&self, request: S::Request) -> S::Response;
+}
+
+pub async fn server<S: Service>(
+    handler: impl Handler<S>,
+    mut channel: impl Channel<In = S::Response, Out = S::Request>,
+) -> Result<(), crate::ChannelError> {
+    loop {
+        let request = channel.recv().await?;
+        let response = handler.handle(request).await;
+        channel.send(response).await?;
+    }
+}
 
 #[macro_export]
 macro_rules! define_rpc {
@@ -18,12 +60,18 @@ macro_rules! define_rpc {
         }
     ) => {
 
-    #[allow(non_snake_case)]
-    #[allow(non_camel_case_types)]
+    #[allow(non_snake_case, non_camel_case_types, async_fn_in_trait)]
     $vis mod $service {
         use super::*;
-        use $crate::rpc::*;
+        use $crate::rpc::{self,*};
         use snafu::ResultExt;
+
+        pub trait Handler
+        {
+            $(
+                async fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
+            )*
+        }
 
         #[derive(serde::Serialize, serde::Deserialize)]
         pub enum Request {
@@ -36,54 +84,50 @@ macro_rules! define_rpc {
             $($function($response)),*
         }
 
-        pub async fn route(handler: &impl Handler, request: Request) -> Response {
-            match request {
-                $(Request::$function { $($field),* } => {
-                    let ret = handler.$function($($field),*).await;
+        pub struct Service;
+        impl rpc::Service for Service {
+            type Request = Request;
+            type Response = Response;
 
-                    let response = match ret {
-                        Ok(value) => Response::$function(value),
-                        Err(e) => Response::_Error { message: e.message },
-                    };
+            type Client<C: Caller<Service>> = Client<C>;
+        }
 
-                    response
-                }),*
+        pub struct Route<T>(pub T);
+        impl<T> From<T> for Route<T> {
+            fn from(value: T) -> Self {
+                Self(value)
             }
         }
 
-        #[allow(async_fn_in_trait)]
-        pub trait Handler
-        {
-            $(
-                async fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
-            )*
-        }
+        impl<T: Handler> rpc::Handler<Service> for Route<T> {
+            async fn handle(&self, request: Request) -> Response {
+                match request {
+                    $(Request::$function { $($field),* } => {
+                        let ret = self.0.$function($($field),*).await;
 
+                        let response = match ret {
+                            Ok(value) => Response::$function(value),
+                            Err(e) => Response::_Error { message: e.message },
+                        };
 
-        pub async fn server<C>(handler: impl Handler, mut channel: C) -> Result<(), $crate::ChannelError>
-        where
-        C: $crate::Channel<
-            In = Response,
-            Out = Request,
-        >
-        {
-            loop {
-                let request = channel.recv().await?;
-                let response = route(&handler, request).await;
-                channel.send(response).await?;
+                        response
+                    }),*
+                }
             }
         }
-
 
         pub struct Client<C>(C);
+        impl<C> From<C> for Client<C>
+        where C: Caller<Service>
+        {
+            fn from(value: C) -> Self {
+                Self(value)
+            }
+        }
 
         impl<C> Client<C>
-        where C: Caller<Request, Response>
+        where C: Caller<Service>
         {
-            pub fn new(caller: C) -> Self {
-                Self(caller)
-            }
-
             $(pub async fn $function(
                 &mut self, $($field: $field_type),*
             ) -> Result<$response, ClientError> {
@@ -173,19 +217,4 @@ pub enum ClientError {
         expected: &'static str,
         got: &'static str,
     },
-}
-
-#[allow(async_fn_in_trait)]
-pub trait Caller<Request, Response>: ErrorProvider {
-    async fn call(&mut self, request: Request) -> Result<Response, Self::Error>;
-}
-
-impl<T> Caller<T::In, T::Out> for T
-where
-    T: Channel,
-{
-    async fn call(&mut self, request: T::In) -> Result<T::Out, Self::Error> {
-        self.send(request).await?;
-        self.recv().await
-    }
 }

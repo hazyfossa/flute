@@ -24,26 +24,20 @@ use std::{
 use axum::{Json, Router, extract, routing::get};
 use flute::rpc::RpcResult;
 
-flute::define_rpc!(Service {
+// The following is a generic example of a flute service
+
+flute::define_rpc!(KV {
     fn get(key: String) -> Option<String>;
     fn set(key: String, value: String) -> ();
 });
 
 #[derive(Clone)]
-struct KVHandler {
+struct WebHashMap {
     // In a real-world application you should use scc or dashmap instead
     map: Arc<Mutex<HashMap<String, String>>>,
 }
 
-impl KVHandler {
-    fn new() -> Self {
-        Self {
-            map: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-}
-
-impl Service::Handler for KVHandler {
+impl KV::Handler for WebHashMap {
     async fn get(&self, key: String) -> RpcResult<Option<String>> {
         let map = self.map.lock().unwrap();
         Ok(map.get(&key).cloned())
@@ -60,17 +54,25 @@ impl Service::Handler for KVHandler {
 // Note that flute does nothing axum-specific, so the same
 // approach could be used with other frameworks
 async fn api(
-    handler: extract::State<KVHandler>,
-    request: extract::Json<Service::Request>,
-) -> Json<Service::Response> {
-    Service::route(&handler.0, request.0).await.into()
+    service: extract::State<WebHashMap>,
+    request: extract::Json<KV::Request>,
+) -> Json<KV::Response> {
+    // connect the handler functions as service routes
+    let service = KV::Route(service.0);
+
+    // use the handler manually
+    use flute::rpc::Handler;
+
+    service.handle(request.0).await.into()
 }
 
 #[tokio::main]
 async fn main() {
-    let router = Router::new()
-        .route("api", get(api))
-        .with_state(KVHandler::new());
+    let state = WebHashMap {
+        map: Arc::new(Mutex::new(HashMap::new())),
+    };
+
+    let router = Router::new().route("api", get(api)).with_state(state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await.unwrap();
     axum::serve(listener, router).await.unwrap();

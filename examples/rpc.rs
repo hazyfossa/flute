@@ -1,4 +1,8 @@
-use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
+use flute::{
+    define_rpc,
+    rpc::{self, RpcResult},
+    tools::in_memory,
+};
 
 // The syntax for defining services is similar to traits
 //
@@ -43,8 +47,11 @@ async fn main() {
     let (client_channel, server_channel) =
         in_memory::unbounded_pair::<Simple::Request, Simple::Response>();
 
-    // To create a server, simply call ::server with a handler and an appropriate channel
-    let server = Simple::server(Server, server_channel);
+    // This wrapper automatically connects the handler functions to the service definition
+    let service = Simple::Route(Server);
+
+    // To create a server, simply call server() with an instance and an appropriate channel
+    let server = rpc::server(service, server_channel);
 
     // Server is just a future that enters a loop.
     // You can make it a background task, join with other futures, etc.
@@ -54,7 +61,7 @@ async fn main() {
     // Here we execute both sides simultaneously
     // In a real-world application, these two parts can be in two different binaries
     // both of which depend on a "service-definition" crate containing the define_rpc!
-    let mut client = Simple::Client::new(client_channel);
+    let mut client = Simple::Client::from(client_channel);
     let a = client.echo("Hello".into()).await.unwrap();
     println!("{a}, world!")
 }

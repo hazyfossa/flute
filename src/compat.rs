@@ -178,14 +178,13 @@ pub mod wasm {
         http::{Method, RequestBuilder},
         websocket::{self, futures::WebSocket as WebSocketRaw},
     };
-    use serde::{Serialize, de::DeserializeOwned};
     use snafu::{ResultExt, Snafu, ensure};
 
     use crate::{
         Wire,
         compat::futures::adapt,
         error::ErrorProvider,
-        rpc::Caller,
+        rpc::{Caller, Service},
         tools::error_wrap::fallible,
         transform::{TransformExt, TransformFraming, TransformRx, TransformTx},
     };
@@ -226,12 +225,8 @@ pub mod wasm {
         type Error = FetchError;
     }
 
-    impl<Request, Response> Caller<Request, Response> for FetchJson
-    where
-        Request: Serialize,
-        Response: DeserializeOwned,
-    {
-        async fn call(&mut self, request: Request) -> Result<Response, Self::Error> {
+    impl<S: Service> Caller<S> for FetchJson {
+        async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error> {
             let body = serde_json::to_string(&request)?;
 
             let ret = RequestBuilder::new(&self.url)
