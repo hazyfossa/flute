@@ -1,3 +1,100 @@
+pub mod server {
+
+    use crate::{
+        Channel, ChannelError,
+        rpc::{Handler, Service},
+    };
+
+    #[cfg(feature = "fast-server")]
+    use crate::{Rx, Tx, ops::split::Split};
+
+    pub async fn serve<S: Service>(
+        handler: impl Handler<S>,
+        mut channel: impl Channel<In = S::Response, Out = S::Request>,
+    ) -> Result<(), crate::ChannelError> {
+        loop {
+            let request = match channel.recv().await {
+                Ok(req) => req,
+                Err(ChannelError::Closed) => break Ok(()),
+                Err(e) => return Err(e),
+            };
+
+            let response = handler.handle(request).await;
+            channel.send(response).await?;
+        }
+    }
+
+    #[cfg(feature = "fast-server")]
+    pub async fn serve_fast<S: Service, H, C>(
+        handler: H,
+        channel: C,
+        max_concurrent: usize,
+    ) -> Result<(), crate::ChannelError>
+    where
+        C: Channel<In = S::Response, Out = S::Request> + Split,
+        C::Tx: Clone + 'static,
+        H: Handler<S> + 'static,
+        S::Request: 'static,
+        S::Response: 'static,
+    {
+        use std::sync::Arc;
+        use tokio::task::JoinSet;
+
+        let handler = Arc::new(handler);
+        let (tx, mut rx) = channel.split();
+        let mut tasks = JoinSet::new();
+
+        fn handle_task_result(
+            res: Result<Result<(), crate::ChannelError>, tokio::task::JoinError>,
+        ) -> Result<(), crate::ChannelError> {
+            match res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e),
+                Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
+            }
+        }
+
+        let task = |request| {
+            let handler = Arc::clone(&handler);
+            let mut tx = tx.clone();
+            async move {
+                let response = handler.handle(request).await;
+                tx.send(response).await
+            }
+        };
+
+        loop {
+            // If over capacity, only poll existing
+            if tasks.len() >= max_concurrent {
+                if let Some(res) = tasks.join_next().await {
+                    handle_task_result(res)?;
+                }
+                continue;
+            }
+
+            tokio::select! {
+                // Accept new
+                req = rx.recv() => match req {
+                    Ok(request) => { tasks.spawn_local(task(request)); },
+                    Err(crate::ChannelError::Closed) => break,
+                    Err(e) => return Err(e),
+                },
+                // Poll existing
+                task_res = tasks.join_next(), if !tasks.is_empty() => {
+                    // the unwrap is guarded by is_empty check above
+                    handle_task_result(task_res.unwrap())?;
+                }
+            }
+        }
+
+        while let Some(res) = tasks.join_next().await {
+            handle_task_result(res)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(feature = "kanal")]
 pub mod in_memory {
     pub use crate::{

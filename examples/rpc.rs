@@ -1,8 +1,4 @@
-use flute::{
-    define_rpc,
-    rpc::{self, RpcResult},
-    tools::in_memory,
-};
+use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
 
 // The syntax for defining services is similar to traits
 //
@@ -50,8 +46,8 @@ async fn main() {
     // This wrapper automatically connects the handler functions to the service definition
     let service = Simple::Route(Server);
 
-    // To create a server, simply call server() with an instance and an appropriate channel
-    let server = rpc::server(service, server_channel);
+    // To create a server, simply call serve() with an instance and an appropriate channel
+    let server = flute::tools::server::serve(service, server_channel);
 
     // Server is just a future that enters a loop.
     // You can make it a background task, join with other futures, etc.

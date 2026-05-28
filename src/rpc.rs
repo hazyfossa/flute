@@ -40,17 +40,6 @@ pub trait Handler<S: Service + ?Sized> {
     async fn handle(&self, request: S::Request) -> S::Response;
 }
 
-pub async fn server<S: Service>(
-    handler: impl Handler<S>,
-    mut channel: impl Channel<In = S::Response, Out = S::Request>,
-) -> Result<(), crate::ChannelError> {
-    loop {
-        let request = channel.recv().await?;
-        let response = handler.handle(request).await;
-        channel.send(response).await?;
-    }
-}
-
 #[macro_export]
 macro_rules! define_rpc {
     (
