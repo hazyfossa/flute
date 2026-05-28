@@ -1,11 +1,5 @@
 use flute::{define_rpc, rpc::RpcResult, tools::in_memory};
 
-// The syntax for defining services is similar to traits
-//
-// Flute derives for you automatically three core primitives:
-// - Client interface
-// - Server definition boilerplate
-// - Request/Response as complete enum types
 define_rpc!(Simple {
     fn echo(something: String) -> String;
 
