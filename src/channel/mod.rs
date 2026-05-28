@@ -3,7 +3,6 @@
 use crate::error::{ErrorProvider, Typed};
 
 pub mod dynamic;
-pub mod error;
 pub mod ops;
 pub mod transform;
 
