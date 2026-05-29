@@ -1,33 +1,30 @@
-use crate::{error::ErrorProvider, *};
 use snafu::ResultExt;
 
-pub trait TransformFraming: ErrorProvider {
-    type In;
-    type Out;
+use crate::{Rx, Tx, error::ErrorProvider};
+
+pub trait Transform: ErrorProvider {
+    type Before;
+    type After;
+
+    fn encode(&mut self, before: Self::Before) -> Result<Self::After, Self::Error>;
+    fn decode(&mut self, after: Self::After) -> Result<Self::Before, Self::Error>;
 }
 
-pub trait TransformTx: TransformFraming {
-    fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error>;
-}
+// transformed channel
 
-pub trait TransformRx: TransformFraming {
-    fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error>;
-}
-
-pub struct Transformed<T, I, const TX: bool, const RX: bool> {
-    transform: T,
+pub struct Transformed<I, T> {
     inner: I,
+    transform: T,
 }
 
-// If TX == true, transform tx
-impl<T, I, const ANY: bool> Tx for Transformed<T, I, true, ANY>
+impl<I, T> Tx for Transformed<I, T>
 where
-    T: TransformTx,
-    I: Tx<In = T::Out>,
+    I: Tx,
+    T: Transform<After = I::In>,
 {
-    type In = T::In;
+    type In = T::Before;
 
-    async fn send(&mut self, data: T::In) -> Result<(), ChannelError> {
+    async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
         let transformed = self
             .transform
             .encode(data)
@@ -37,26 +34,14 @@ where
     }
 }
 
-// If TX == false, passthrough tx
-impl<T, I, const ANY: bool> Tx for Transformed<T, I, false, ANY>
+impl<I, T> Rx for Transformed<I, T>
 where
-    I: Tx,
+    I: Rx,
+    T: Transform<After = I::Out>,
 {
-    type In = I::In;
+    type Out = T::Before;
 
-    fn send(&mut self, data: Self::In) -> impl Future<Output = Result<(), ChannelError>> {
-        self.inner.send(data)
-    }
-}
-
-// If RX == true, transform rx
-impl<T, I, const ANY: bool> Rx for Transformed<T, I, ANY, true>
-where
-    T: TransformRx,
-    I: Rx<Out = T::Out>,
-{
-    type Out = T::In;
-    async fn recv(&mut self) -> Result<T::In, ChannelError> {
+    async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
         let data = self.inner.recv().await?;
 
         let transformed = self
@@ -67,83 +52,3 @@ where
         Ok(transformed)
     }
 }
-
-// If RX == false, passthrough rx
-impl<T, I, const ANY: bool> Rx for Transformed<T, I, ANY, false>
-where
-    I: Rx,
-{
-    type Out = I::Out;
-
-    fn recv(&mut self) -> impl Future<Output = Result<Self::Out, ChannelError>> {
-        self.inner.recv()
-    }
-}
-
-// Ext (interface)
-
-pub trait TransformExt: Sized {
-    fn transform<T: TransformTx + TransformRx>(
-        self,
-        transform: T,
-    ) -> Transformed<T, Self, true, true> {
-        Transformed {
-            transform,
-            inner: self,
-        }
-    }
-
-    fn transform_tx<T: TransformTx>(self, transform: T) -> Transformed<T, Self, true, false> {
-        Transformed {
-            transform,
-            inner: self,
-        }
-    }
-
-    fn transform_rx<T: TransformRx>(self, transform: T) -> Transformed<T, Self, false, true> {
-        Transformed {
-            transform,
-            inner: self,
-        }
-    }
-}
-
-impl<T: Channel> TransformExt for T {}
-
-// mod variadic {
-//     use std::fmt::Debug;
-
-//     use snafu::Snafu;
-
-//     use crate::error::ErrorProvider;
-
-//     use super::Transform;
-
-//     #[derive(Snafu)]
-//     enum CombinedError<A: ErrorProvider, B: ErrorProvider> {
-//         A { source: A::Error },
-//         B { source: B::Error },
-//     }
-
-//     impl<A: ErrorProvider, B: ErrorProvider> Debug for CombinedError<A, B> {
-//         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//             match self {
-//                 CombinedError::A { source } => write!(f, "{} error: {}", A::name(), source),
-//                 CombinedError::B { source } => write!(f, "{} error: {}", B::name(), source),
-//             }
-//         }
-//     }
-
-//     impl<A: ErrorProvider, B: ErrorProvider> ErrorProvider for (A, B) {
-//         type Error = CombinedError<A, B>;
-//     }
-
-//     impl<A: Transform, B: Transform<In = A::Out, Out = A::In>> Transform for (A, B) {
-//         type In = A::In;
-//         type Out = A::Out;
-
-//         fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
-//             Ok(self.0.encode(self.1.encode(data)?)?)
-//         }
-//     }
-// }
