@@ -176,26 +176,30 @@ pub mod wasm {
 
     // WebSocket
 
-    // TODO: requires rx/tx maps
-    // fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
-    //     adapt(raw)
-    // }
+    fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
+        let wire = adapt(raw);
+        // TODO: better syntax (intentionally delayed)
+        crate::transform::map::MapRx {
+            inner: wire,
+            f: |r: Result<websocket::Message, _>| r.into(),
+        }
+    }
 
-    // pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
-    //     // NOTE: i really don't know why gloo doesn't do this error map internally
-    //     let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
-    //     Ok(websocket_wrap(js_bind))
-    // }
+    pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+        // NOTE: i really don't know why gloo doesn't do this error map internally
+        let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
+        Ok(websocket_wrap(js_bind))
+    }
 
-    // pub fn websocket_open_with_protocol(
-    //     url: &str,
-    //     protocol: &str,
-    // ) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
-    //     let js_bind = WebSocketRaw::open_with_protocol(url, protocol)
-    //         .map_err(|e| gloo_net::Error::JsError(e))?;
+    pub fn websocket_open_with_protocol(
+        url: &str,
+        protocol: &str,
+    ) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+        let js_bind = WebSocketRaw::open_with_protocol(url, protocol)
+            .map_err(|e| gloo_net::Error::JsError(e))?;
 
-    //     Ok(websocket_wrap(js_bind))
-    // }
+        Ok(websocket_wrap(js_bind))
+    }
 
     #[derive(Debug, Snafu)]
     #[snafu(display("invalid type of websocket message: expected {expected}, got {got}"))]

@@ -52,7 +52,7 @@ where
 }
 
 // inverse
-
+// TODO: consider if this is useful
 pub struct Inverse<T>(T);
 
 impl<T> ErrorProvider for Inverse<T>
@@ -138,5 +138,43 @@ where
         let rx = Transformed::<I::Rx, T>::new(rx);
 
         (tx, rx)
+    }
+}
+
+pub mod map {
+    use snafu::ResultExt;
+
+    use crate::{Rx, Tx, error::BoxedErr};
+
+    // TODO (in order of complexity): MapTx, const generic Map, unification of Map and Transform
+
+    pub struct MapRx<I, F> {
+        pub inner: I,
+        pub f: F,
+    }
+
+    impl<I, F, T, E> Rx for MapRx<I, F>
+    where
+        I: Rx,
+        F: FnMut(I::Out) -> Result<T, E>,
+        E: Into<BoxedErr>,
+    {
+        type Out = T;
+
+        async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
+            let data = self.inner.recv().await?;
+            (self.f)(data).whatever_context("map error")
+        }
+    }
+
+    impl<I, Any> Tx for MapRx<I, Any>
+    where
+        I: Tx,
+    {
+        type In = I::In;
+
+        async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
+            self.inner.send(data).await
+        }
     }
 }
