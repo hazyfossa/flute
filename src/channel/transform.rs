@@ -10,8 +10,6 @@ pub trait Transform: ErrorProvider {
     fn decode(&mut self, after: Self::After) -> Result<Self::Before, Self::Error>;
 }
 
-// transformed channel
-
 pub struct Transformed<I, T> {
     inner: I,
     transform: T,

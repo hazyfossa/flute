@@ -32,8 +32,6 @@ pub mod futures {
         }
     }
 
-    // NOTE: Wire may be different from T::Item if stream is fallible.
-    // use tools::error_flatten to deal with this
     impl<T: Stream + Unpin, Wire> Rx for Adapter<T, Wire> {
         type Out = T::Item;
 
@@ -97,79 +95,6 @@ pub mod kanal {
     }
 }
 
-#[cfg(feature = "data-json")]
-pub mod json {
-    use std::marker::PhantomData;
-
-    use serde::{Serialize, de::DeserializeOwned};
-
-    use crate::{error::ErrorProvider, transform::*};
-
-    // TODO: would generics on transform trait eliminate this PhantomData?
-    pub struct Json<Value>(PhantomData<Value>);
-    pub fn json<Value>() -> Json<Value> {
-        Json(PhantomData)
-    }
-
-    impl<Value> ErrorProvider for Json<Value> {
-        type Error = serde_json::error::Error;
-    }
-
-    impl<Value> TransformFraming for Json<Value> {
-        type In = Value;
-        type Out = Vec<u8>;
-    }
-
-    impl<Value: Serialize> TransformTx for Json<Value> {
-        fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
-            Ok(serde_json::to_vec(&data)?)
-        }
-    }
-
-    // TODO: slices are blocked on v3
-    impl<'de, Value: DeserializeOwned> TransformRx for Json<Value> {
-        fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
-            Ok(serde_json::from_slice(&data)?)
-        }
-    }
-}
-
-#[cfg(feature = "data-postcard")]
-pub mod postcard {
-    use std::marker::PhantomData;
-
-    use serde::{Serialize, de::DeserializeOwned};
-
-    use crate::{error::ErrorProvider, transform::*};
-
-    pub struct Postcard<Value>(PhantomData<Value>);
-    pub fn postcard<Value>() -> Postcard<Value> {
-        Postcard(PhantomData)
-    }
-
-    impl<Value> ErrorProvider for Postcard<Value> {
-        type Error = postcard::Error;
-    }
-
-    impl<Value> TransformFraming for Postcard<Value> {
-        type In = Value;
-        type Out = Vec<u8>;
-    }
-
-    impl<Value: Serialize> TransformTx for Postcard<Value> {
-        fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
-            Ok(postcard::to_stdvec(&data)?)
-        }
-    }
-
-    // TODO: slices are blocked on v3
-    impl<'de, Value: DeserializeOwned> TransformRx for Postcard<Value> {
-        fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
-            Ok(postcard::from_bytes(&data)?)
-        }
-    }
-}
-
 #[cfg(feature = "wasm")]
 pub mod wasm {
     use std::any::type_name_of_val;
@@ -185,8 +110,7 @@ pub mod wasm {
         compat::futures::adapt,
         error::ErrorProvider,
         rpc::{Caller, Service},
-        tools::error_wrap::fallible,
-        transform::{TransformExt, TransformFraming, TransformRx, TransformTx},
+        transform::Transform,
     };
 
     // Fetch
@@ -252,25 +176,26 @@ pub mod wasm {
 
     // WebSocket
 
-    fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
-        adapt(raw).transform_rx(fallible())
-    }
+    // TODO: requires rx/tx maps
+    // fn websocket_wrap(raw: WebSocketRaw) -> impl Wire<websocket::Message> {
+    //     adapt(raw)
+    // }
 
-    pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
-        // NOTE: i really don't know why gloo doesn't do this error map internally
-        let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
-        Ok(websocket_wrap(js_bind))
-    }
+    // pub fn websocket_open(url: &str) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+    //     // NOTE: i really don't know why gloo doesn't do this error map internally
+    //     let js_bind = WebSocketRaw::open(url).map_err(|e| gloo_net::Error::JsError(e))?;
+    //     Ok(websocket_wrap(js_bind))
+    // }
 
-    pub fn websocket_open_with_protocol(
-        url: &str,
-        protocol: &str,
-    ) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
-        let js_bind = WebSocketRaw::open_with_protocol(url, protocol)
-            .map_err(|e| gloo_net::Error::JsError(e))?;
+    // pub fn websocket_open_with_protocol(
+    //     url: &str,
+    //     protocol: &str,
+    // ) -> Result<impl Wire<websocket::Message>, gloo_net::Error> {
+    //     let js_bind = WebSocketRaw::open_with_protocol(url, protocol)
+    //         .map_err(|e| gloo_net::Error::JsError(e))?;
 
-        Ok(websocket_wrap(js_bind))
-    }
+    //     Ok(websocket_wrap(js_bind))
+    // }
 
     #[derive(Debug, Snafu)]
     #[snafu(display("invalid type of websocket message: expected {expected}, got {got}"))]
@@ -287,19 +212,15 @@ pub mod wasm {
                 type Error = WebsocketSelectError;
             }
 
-            impl TransformFraming for $name {
-                type In = websocket::Message;
-                type Out = $ty;
-            }
+            impl Transform for $name {
+                type Before = websocket::Message;
+                type After = $ty;
 
-            impl TransformRx for $name {
-                fn decode(&mut self, data: Self::Out) -> Result<Self::In, Self::Error> {
+                fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
                     Ok(websocket::Message::$selector(data))
                 }
-            }
 
-            impl TransformTx for $name {
-                fn encode(&mut self, data: Self::In) -> Result<Self::Out, Self::Error> {
+                fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
                     match data {
                         websocket::Message::$selector(correct) => Ok(correct),
                         ref other => Err(WebsocketSelectError {
