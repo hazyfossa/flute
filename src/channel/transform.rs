@@ -1,5 +1,3 @@
-use std::any::type_name;
-
 use crate::{error::ErrorProvider, *};
 use snafu::ResultExt;
 
@@ -33,7 +31,7 @@ where
         let transformed = self
             .transform
             .encode(data)
-            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+            .whatever_context(format!("{} transform error", T::name()))?;
 
         self.inner.send(transformed).await
     }
@@ -64,7 +62,7 @@ where
         let transformed = self
             .transform
             .decode(data)
-            .whatever_context(format!("{} transform error", type_name::<T>()))?;
+            .whatever_context(format!("{} transform error", T::name()))?;
 
         Ok(transformed)
     }
