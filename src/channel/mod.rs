@@ -41,7 +41,14 @@ where
     type Error = ChannelError;
 }
 
-crate::trait_alias!(
-    #[doc = "A wire is a channel, for which input and output are the same"]
-    pub trait Wire<T>: Channel<In = T, Out = T>
-);
+// A wire is a channel, for which input and output are the same
+pub trait Wire {
+    type Repr;
+}
+
+impl<T, Repr> Wire for T
+where
+    T: Channel<In = Repr, Out = Repr>,
+{
+    type Repr = Repr;
+}

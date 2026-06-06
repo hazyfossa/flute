@@ -1,6 +1,6 @@
 use snafu::ResultExt;
 
-use crate::{Rx, Tx, Wire, error::ErrorProvider, ops::split::Split};
+use crate::{Channel, Rx, Tx, error::ErrorProvider, ops::split::Split};
 
 pub trait Transform: ErrorProvider {
     type Before;
@@ -125,7 +125,7 @@ impl<I, T> Transformed<I, T> {
 // splitting a transformed wire is cheap if there is no state to synchronize
 impl<I, T> Split for Transformed<I, T>
 where
-    I: Split + Wire<T::After>,
+    I: Split + Channel<In = T::After, Out = T::After>,
     T: Transform + Stateless,
 {
     type Rx = Transformed<I::Rx, T>;
@@ -140,6 +140,24 @@ where
         (tx, rx)
     }
 }
+
+// variadic
+
+// impl<A, B> Transform for (A, B)
+// where
+//     A: Transform,
+//     B: Transform<Before = A::After>,
+// {
+//     type Before = A::Before;
+//     type After = B::After;
+//     fn encode(&mut self, before: Self::Before) -> Result<Self::After, Self::Error> {
+//         let (a, b) = self;
+//         let data = before;
+//         let data = a.encode(data)?;
+//         let data = b.encode(data)?;
+//         Ok(data)
+//     }
+// }
 
 pub mod map {
     use snafu::ResultExt;

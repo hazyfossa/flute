@@ -5,7 +5,7 @@ mod macros {
     macro_rules! trait_alias {
         (
             $(#[$($attr:meta)*])?
-            $vis:vis trait $name:ident $(<$($generic:ident)+>)? : $($for:tt)*
+            $vis:vis trait $name:ident $(<$($generic:ident),*>)? : $($for:tt)*
             $(where $($generic_bound:tt)+)?
         ) => {
                 $(#[$($attr)*])?
@@ -51,5 +51,19 @@ pub mod error {
         fn from(value: T) -> Self {
             Box::new(value)
         }
+    }
+
+    // variadic
+    struct VariadicError {
+        inner: BoxedErr,
+        name: &'static str,
+    }
+
+    impl<A, B> ErrorProvider for (A, B)
+    where
+        A: ErrorProvider,
+        B: ErrorProvider,
+    {
+        type Error = VariadicError;
     }
 }
