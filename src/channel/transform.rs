@@ -133,56 +133,117 @@ where
     }
 }
 
-// variadic
+// variadics
 use crate::utils::error::EraseResultExt;
 
-impl<A, B> Transform for (A, B)
-where
-    A: Transform,
-    B: Transform<Before = A::After>,
-{
-    type Before = A::Before;
-    type After = B::After;
-    fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
-        let (a, b) = self;
-        let data = a.encode(data).erase_with_provider::<A>()?;
-        let data = b.encode(data).erase_with_provider::<B>()?;
-        Ok(data)
-    }
+macro_rules! var_impl {
+    (#[$($t:ident)*] { $($bounds:tt)* }) => {
+        impl< $($t),* > Transform for ( $($t),* )
+        where $($bounds)*
+        {
+            type Before = var_impl!(@before $($t),*);
+            type After =  var_impl!(@after $($t),*);
 
-    fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
-        let (a, b) = self;
-        // Decodes are in reverse order
-        let data = b.decode(data).erase_with_provider::<B>()?;
-        let data = a.decode(data).erase_with_provider::<A>()?;
-        Ok(data)
-    }
+            fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
+                let ( $($t),* ) = self;
+                var_impl!(@encode_chain {data} $($t),*);
+                Ok(data)
+            }
+
+            fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
+                let ( $($t),* ) = self;
+                var_impl!(@decode_chain {data} $($t),*);
+                Ok(data)
+            }
+        }
+    };
+
+    // @bounds
+    // TODO: currently unused, as macros cannot expand inside where
+
+    // When no ident passed as previous, treat the first separately, then forward
+    (@bounds /* [ret=None] (previous=None) */ $first:ident, $($next:tt),*) => {
+        var_impl!(
+            @bounds
+            /* ret = */ [$first: Transform,]
+            /* previous = */ ($first)
+            $($next),*
+        )
+
+    };
+
+    // Munch with a rolling context (previous -> current)
+    (@bounds [$($ret:tt)*] ($previous:ident) $current:ident, $($next:tt),*) => {
+        var_impl!(@bounds
+            /* ret = */ [
+                $($ret)*
+                $current: Transform<Before = $previous::After>,
+            ]
+            /* previous = */ ($current)
+            $($next),*
+        )
+    };
+
+    (@bounds [$($ret:tt)*] ($last:ident)) => { [$($ret)*] };
+
+    // @before
+
+    (@before $first:ident, $($next:tt),*) => {
+        $first::Before
+    };
+
+    // @after
+
+    // If have more than one token, discard and forward
+    (@after $current:tt, $($next:tt),*) => {
+        var_impl!(@after $($next),*)
+    };
+
+    // Match last token
+    (@after $last:ident) => {
+        $last::After
+    };
+
+    // @encode_chain
+
+    (@encode_chain {$data:ident} $($t:ident),*) => {
+        $(
+            let $data = $t.encode($data).erase_with_provider::<$t>()?;
+        )*
+    };
+
+    // @decode_chain
+
+    // The following code is best read backwards
+    // It actually makes sense, because decodes are in reverse order of encodes :)
+
+    // 3. Return $ret once passed all identifiers
+    (@decode_chain [$($ret:tt)*] {$data:ident}) => {
+        $($ret)*
+    };
+
+    // 2. Keeping a return value $ret, for each next ident
+    // prepend a line to the beginning of the return value
+    // effectively building $ret in reverse order
+    (@decode_chain [$($ret:tt)*] {$data:ident} $head:ident $($tail:ident)*) => {
+        var_impl!(@decode_chain [
+            let $data = $head.decode($data).erase_with_provider::<$head>()?;
+            $($ret)*
+        ] {$data} $($tail)*);
+    };
+
+    // 1. Initialize the macro with $ret as an empty value
+    (@decode_chain {$data:ident} $($t:ident),*) => {
+        var_impl!(@decode_chain [] {$data} $($t)*);
+    };
 }
 
-impl<A, B, C> Transform for (A, B, C)
-where
-    A: Transform,
-    B: Transform<Before = A::After>,
-    C: Transform<Before = B::After>,
-{
-    type Before = A::Before;
-    type After = C::After;
-    fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
-        let (a, b, c) = self;
-        let data = a.encode(data).erase_with_provider::<A>()?;
-        let data = b.encode(data).erase_with_provider::<B>()?;
-        let data = c.encode(data).erase_with_provider::<C>()?;
-        Ok(data)
-    }
-
-    fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
-        let (a, b, c) = self;
-        // Decodes are in reverse order
-        let data = c.decode(data).erase_with_provider::<C>()?;
-        let data = b.decode(data).erase_with_provider::<B>()?;
-        let data = a.decode(data).erase_with_provider::<A>()?;
-        Ok(data)
-    }
+#[allow(non_snake_case)]
+mod variadics {
+    use super::*;
+    var_impl!(#[A B] {A: Transform, B: Transform<Before = A::After>});
+    var_impl!(#[A B C] {A: Transform, B: Transform<Before = A::After>, C: Transform<Before = B::After>});
+    var_impl!(#[A B C D] {A: Transform, B: Transform<Before = A::After>, C: Transform<Before = B::After>, D: Transform<Before = C::After>});
 }
 
 pub mod map {
