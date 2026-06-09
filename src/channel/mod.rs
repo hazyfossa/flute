@@ -1,6 +1,6 @@
 #![allow(async_fn_in_trait)]
 
-use crate::error::{ErrorProvider, Typed};
+use crate::error::{ErasedError, ErrorProvider};
 
 pub mod dynamic;
 pub mod ops;
@@ -21,12 +21,8 @@ pub enum ChannelError {
     #[snafu(display("channel closed"))]
     Closed,
 
-    #[snafu(whatever)]
-    Other {
-        message: String,
-        #[snafu(source(from(Box<dyn Typed>, Some)))]
-        source: Option<Box<dyn Typed>>,
-    },
+    #[snafu(context(false))]
+    Other { source: ErasedError },
 }
 
 crate::trait_alias!(

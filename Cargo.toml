@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-snafu = "0.8.9"
+snafu = "0.9.1"
 serde = { version = "1.0.228", features = ["derive"] }
 futures-util = { version = "0.3.31", optional = true, default-features = false, features = [
     "std",

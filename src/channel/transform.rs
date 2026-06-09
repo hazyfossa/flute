@@ -1,5 +1,3 @@
-use snafu::ResultExt;
-
 use crate::{Channel, Rx, Tx, error::ErrorProvider, ops::split::Split};
 
 pub trait Transform: ErrorProvider {
@@ -23,10 +21,7 @@ where
     type In = T::Before;
 
     async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
-        let transformed = self
-            .transform
-            .encode(data)
-            .whatever_context(format!("{} transform error", T::name()))?;
+        let transformed = self.transform.encode(data).erase_with_provider::<T>()?;
 
         self.inner.send(transformed).await
     }
@@ -42,10 +37,7 @@ where
     async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
         let data = self.inner.recv().await?;
 
-        let transformed = self
-            .transform
-            .decode(data)
-            .whatever_context(format!("{} transform error", T::name()))?;
+        let transformed = self.transform.decode(data).erase_with_provider::<T>()?;
 
         Ok(transformed)
     }
@@ -60,7 +52,7 @@ where
     T: ErrorProvider,
 {
     type Error = T::Error;
-    fn name() -> &'static str {
+    fn name() -> Option<&'static str> {
         T::name()
     }
 }
@@ -142,27 +134,59 @@ where
 }
 
 // variadic
+use crate::utils::error::EraseResultExt;
 
-// impl<A, B> Transform for (A, B)
-// where
-//     A: Transform,
-//     B: Transform<Before = A::After>,
-// {
-//     type Before = A::Before;
-//     type After = B::After;
-//     fn encode(&mut self, before: Self::Before) -> Result<Self::After, Self::Error> {
-//         let (a, b) = self;
-//         let data = before;
-//         let data = a.encode(data)?;
-//         let data = b.encode(data)?;
-//         Ok(data)
-//     }
-// }
+impl<A, B> Transform for (A, B)
+where
+    A: Transform,
+    B: Transform<Before = A::After>,
+{
+    type Before = A::Before;
+    type After = B::After;
+    fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
+        let (a, b) = self;
+        let data = a.encode(data).erase_with_provider::<A>()?;
+        let data = b.encode(data).erase_with_provider::<B>()?;
+        Ok(data)
+    }
+
+    fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
+        let (a, b) = self;
+        // Decodes are in reverse order
+        let data = b.decode(data).erase_with_provider::<B>()?;
+        let data = a.decode(data).erase_with_provider::<A>()?;
+        Ok(data)
+    }
+}
+
+impl<A, B, C> Transform for (A, B, C)
+where
+    A: Transform,
+    B: Transform<Before = A::After>,
+    C: Transform<Before = B::After>,
+{
+    type Before = A::Before;
+    type After = C::After;
+    fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
+        let (a, b, c) = self;
+        let data = a.encode(data).erase_with_provider::<A>()?;
+        let data = b.encode(data).erase_with_provider::<B>()?;
+        let data = c.encode(data).erase_with_provider::<C>()?;
+        Ok(data)
+    }
+
+    fn decode(&mut self, data: Self::After) -> Result<Self::Before, Self::Error> {
+        let (a, b, c) = self;
+        // Decodes are in reverse order
+        let data = c.decode(data).erase_with_provider::<C>()?;
+        let data = b.decode(data).erase_with_provider::<B>()?;
+        let data = a.decode(data).erase_with_provider::<A>()?;
+        Ok(data)
+    }
+}
 
 pub mod map {
-    use snafu::ResultExt;
-
-    use crate::{Rx, Tx, error::BoxedErr};
+    use crate::{Rx, Tx, error::BoxedError};
 
     // TODO (in order of complexity): MapTx, const generic Map, unification of Map and Transform
 
@@ -175,13 +199,13 @@ pub mod map {
     where
         I: Rx,
         F: FnMut(I::Out) -> Result<T, E>,
-        E: Into<BoxedErr>,
+        E: Into<BoxedError>,
     {
         type Out = T;
 
         async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
             let data = self.inner.recv().await?;
-            (self.f)(data).whatever_context("map error")
+            (self.f)(data)
         }
     }
 

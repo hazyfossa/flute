@@ -6,9 +6,8 @@ pub mod futures {
         Sink, SinkExt, Stream, StreamExt,
         stream::{SplitSink, SplitStream},
     };
-    use snafu::ResultExt;
 
-    use crate::{ChannelError, Rx, Tx, error::BoxedErr, ops::split};
+    use crate::{ChannelError, Rx, Tx, error::BoxedError, ops::split};
 
     pub struct Adapter<T, Wire> {
         inner: T,
@@ -24,11 +23,11 @@ pub mod futures {
 
     impl<Wire, T: Sink<Wire> + Unpin> Tx for Adapter<T, Wire>
     where
-        T::Error: Into<BoxedErr>,
+        T::Error: Into<BoxedError>,
     {
         type In = Wire;
         async fn send(&mut self, data: Wire) -> Result<(), ChannelError> {
-            Ok(self.inner.send(data).await.whatever_context("sink error")?)
+            Ok(self.inner.send(data).await?)
         }
     }
 
@@ -46,7 +45,7 @@ pub mod futures {
     impl<Wire, T> split::Split for Adapter<T, Wire>
     where
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
-        T::Error: Into<BoxedErr>,
+        T::Error: Into<BoxedError>,
     {
         type Rx = Adapter<SplitStream<T>, Wire>;
         type Tx = Adapter<SplitSink<T, Wire>, Wire>;
