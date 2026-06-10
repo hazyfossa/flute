@@ -7,7 +7,7 @@ pub mod futures {
         stream::{SplitSink, SplitStream},
     };
 
-    use crate::{ChannelError, Rx, Tx, error::BoxedError, ops::split};
+    use crate::{ChannelError, Rx, Tx, ops::split};
 
     pub struct Adapter<T, Wire> {
         inner: T,
@@ -23,7 +23,7 @@ pub mod futures {
 
     impl<Wire, T: Sink<Wire> + Unpin> Tx for Adapter<T, Wire>
     where
-        T::Error: Into<BoxedError>,
+        T::Error: Into<eyre::Error>,
     {
         type In = Wire;
         async fn send(&mut self, data: Wire) -> Result<(), ChannelError> {
@@ -45,7 +45,7 @@ pub mod futures {
     impl<Wire, T> split::Split for Adapter<T, Wire>
     where
         T: Stream<Item = Wire> + Sink<Wire> + Unpin,
-        T::Error: Into<BoxedError>,
+        T::Error: Into<eyre::Error>,
     {
         type Rx = Adapter<SplitStream<T>, Wire>;
         type Tx = Adapter<SplitSink<T, Wire>, Wire>;
@@ -98,11 +98,11 @@ pub mod kanal {
 pub mod wasm {
     use std::any::type_name_of_val;
 
+    use eyre::{Context, ensure};
     use gloo_net::{
         http::{Method, RequestBuilder},
         websocket::{self, futures::WebSocket as WebSocketRaw},
     };
-    use snafu::{ResultExt, Snafu, ensure};
 
     use crate::{
         Wire,
@@ -113,18 +113,6 @@ pub mod wasm {
     };
 
     // Fetch
-
-    #[derive(Debug, Snafu)]
-    pub enum FetchError {
-        #[snafu(context(false))]
-        SendError { source: gloo_net::Error },
-        #[snafu(context(false))]
-        DataFormatError { source: serde_json::Error },
-        #[snafu(display("cannot parse response body as string"))]
-        BodyParseError { source: gloo_net::Error },
-        #[snafu(display("[{status}]: {body}"))]
-        HttpApiError { status: u16, body: String },
-    }
 
     pub struct FetchJson {
         url: String,
@@ -145,7 +133,7 @@ pub mod wasm {
     }
 
     impl ErrorProvider for FetchJson {
-        type Error = FetchError;
+        type Error = eyre::Error;
     }
 
     impl<S: Service> Caller<S> for FetchJson {
@@ -158,15 +146,12 @@ pub mod wasm {
                 .send()
                 .await?;
 
-            let body = ret.text().await.context(BodyParseSnafu)?;
+            let body = ret
+                .text()
+                .await
+                .context("cannot parse response body as string")?;
 
-            ensure!(
-                ret.ok(),
-                HttpApiSnafu {
-                    status: ret.status(),
-                    body,
-                }
-            );
+            ensure!(ret.ok(), "[{}] {:?}", ret.status(), ret.body());
 
             let response = serde_json::from_str(&body)?;
             Ok(response)
@@ -200,19 +185,12 @@ pub mod wasm {
         Ok(websocket_wrap(js_bind))
     }
 
-    #[derive(Debug, Snafu)]
-    #[snafu(display("invalid type of websocket message: expected {expected}, got {got}"))]
-    pub struct WebsocketSelectError {
-        expected: &'static str,
-        got: &'static str,
-    }
-
     macro_rules! ws_select_impl {
         ($vis:vis $name:ident ($ty:ty => $selector:ident)) => {
             $vis struct $name;
 
             impl ErrorProvider for $name {
-                type Error = WebsocketSelectError;
+                type Error = eyre::Error;
             }
 
             impl Transform for $name {
@@ -226,10 +204,10 @@ pub mod wasm {
                 fn encode(&mut self, data: Self::Before) -> Result<Self::After, Self::Error> {
                     match data {
                         websocket::Message::$selector(correct) => Ok(correct),
-                        ref other => Err(WebsocketSelectError {
-                            expected: stringify!($ty),
-                            got: type_name_of_val(other),
-                        }),
+                        ref other => eyre::bail!("invalid type of websocket message: expected {}, got {}",
+                            /*expected*/ stringify!($ty),
+                            /*got*/ type_name_of_val(other),
+                        ),
                     }
                 }
             }

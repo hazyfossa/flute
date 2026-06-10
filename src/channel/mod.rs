@@ -1,10 +1,10 @@
 #![allow(async_fn_in_trait)]
 
-use crate::error::{ErasedError, ErrorProvider};
-
 pub mod dynamic;
 pub mod ops;
 pub mod transform;
+
+// TODO: re-integrate Tx, Rx with ErrorProvider. Implementations should never self-erase.
 
 pub trait Tx {
     type In;
@@ -16,26 +16,25 @@ pub trait Rx {
     async fn recv(&mut self) -> Result<Self::Out, ChannelError>;
 }
 
-#[derive(Debug, snafu::Snafu)]
+#[derive(Debug)]
 pub enum ChannelError {
-    #[snafu(display("channel closed"))]
     Closed,
+    Other(eyre::Error),
+}
 
-    #[snafu(context(false))]
-    Other { source: ErasedError },
+impl<T> From<T> for ChannelError
+where
+    T: Into<eyre::Error>,
+{
+    fn from(value: T) -> Self {
+        Self::Other(value.into())
+    }
 }
 
 crate::trait_alias!(
     #[doc = "A channel is a combination of a Receiver and Transmitter"]
     pub trait Channel: Tx + Rx
 );
-
-impl<T> ErrorProvider for T
-where
-    T: Channel,
-{
-    type Error = ChannelError;
-}
 
 // A wire is a channel, for which input and output are the same
 pub trait Wire {

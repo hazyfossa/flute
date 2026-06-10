@@ -3,13 +3,10 @@
 
 use std::fmt::Debug;
 
-use snafu::Snafu;
+use eyre::eyre;
+use thiserror::Error;
 
-use crate::{
-    Channel,
-    error::{ErrorProvider, Typed},
-    trait_alias,
-};
+use crate::{Channel, ChannelError, error::ErrorProvider, trait_alias};
 
 trait_alias!(trait Data: serde::Serialize + serde::de::DeserializeOwned);
 
@@ -25,14 +22,37 @@ pub trait Caller<S: Service>: ErrorProvider {
     async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error>;
 }
 
-impl<T, S> Caller<S> for T
+// If we ever implement unordered channels, here is the place to put a bound
+pub struct OrderedCaller<C>(pub C);
+
+pub struct OrderedCallerError(eyre::Error);
+impl From<ChannelError> for OrderedCallerError {
+    fn from(value: ChannelError) -> Self {
+        Self(match value {
+            ChannelError::Other(e) => e,
+            ChannelError::Closed => eyre!("channel closed in the middle of RPC call"),
+        })
+    }
+}
+
+impl Into<eyre::Error> for OrderedCallerError {
+    fn into(self) -> eyre::Error {
+        self.0
+    }
+}
+
+impl<C> ErrorProvider for OrderedCaller<C> {
+    type Error = OrderedCallerError;
+}
+
+impl<T, S> Caller<S> for OrderedCaller<T>
 where
-    T: Channel,
-    S: Service<Request = T::In, Response = T::Out>,
+    S: Service,
+    T: Channel<In = S::Request, Out = S::Response>,
 {
     async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error> {
-        self.send(request).await?;
-        self.recv().await
+        self.0.send(request).await?;
+        Ok(self.0.recv().await?)
     }
 }
 
@@ -53,7 +73,6 @@ macro_rules! define_rpc {
     $vis mod $service {
         use super::*;
         use $crate::rpc::{self,*};
-        use snafu::ResultExt;
 
         pub trait Handler
         {
@@ -106,11 +125,22 @@ macro_rules! define_rpc {
         }
 
         pub struct Client<C>(C);
+
         impl<C> From<C> for Client<C>
         where C: Caller<Service>
         {
-            fn from(value: C) -> Self {
-                Self(value)
+            fn from(caller: C) -> Self {
+                Self(caller)
+            }
+        }
+
+        // TODO: this looks like unnecessary codegen
+        // since we have associated From
+        impl<Ch> Client<OrderedCaller<Ch>>
+        where Ch: $crate::Channel<In = Request, Out = Response>
+        {
+            pub fn with_channel(channel: Ch) -> Self {
+                Self::from(OrderedCaller(channel))
             }
         }
 
@@ -123,7 +153,7 @@ macro_rules! define_rpc {
                 let request = Request::$function { $($field),* };
 
                 match self.0.call(request).await
-                    .map_err(|e| ClientError::CallerError { source: e.into() })?
+                    .map_err(|e| ClientError::CallerError(e.into()))?
                 {
                     Response::$function(ret) => Ok(ret),
 
@@ -193,15 +223,15 @@ impl<T: Debug> From<T> for RpcErrorHatch {
 
 pub type RpcResult<T> = std::result::Result<T, RpcErrorHatch>;
 
-#[derive(Debug, Snafu)]
+#[derive(Debug, Error)]
 pub enum ClientError {
-    #[snafu(display("error in caller"))]
-    CallerError { source: Box<dyn Typed> },
+    #[error("{0}")]
+    CallerError(eyre::Error),
 
-    #[snafu(display("{message}"))]
+    #[error("{message}")]
     FunctionError { message: String },
 
-    #[snafu(display("got invalid response: expected {expected}, got: {got}"))]
+    #[error("got invalid response: expected {expected}, got: {got}")]
     ProtocolError {
         expected: &'static str,
         got: &'static str,

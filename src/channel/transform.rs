@@ -247,7 +247,7 @@ mod variadics {
 }
 
 pub mod map {
-    use crate::{Rx, Tx, error::BoxedError};
+    use crate::{ChannelError, Rx, Tx};
 
     // TODO (in order of complexity): MapTx, const generic Map, unification of Map and Transform
 
@@ -260,13 +260,13 @@ pub mod map {
     where
         I: Rx,
         F: FnMut(I::Out) -> Result<T, E>,
-        E: Into<BoxedError>,
+        E: Into<eyre::Error>,
     {
         type Out = T;
 
-        async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
+        async fn recv(&mut self) -> Result<Self::Out, ChannelError> {
             let data = self.inner.recv().await?;
-            (self.f)(data)
+            Ok((self.f)(data)?)
         }
     }
 
@@ -276,7 +276,7 @@ pub mod map {
     {
         type In = I::In;
 
-        async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
+        async fn send(&mut self, data: Self::In) -> Result<(), ChannelError> {
             self.inner.send(data).await
         }
     }
