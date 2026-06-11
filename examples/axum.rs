@@ -22,7 +22,6 @@ use std::{
 };
 
 use axum::{Json, Router, extract, routing::get};
-use flute::rpc::RpcResult;
 
 // The following is a generic example of a flute service
 
@@ -38,15 +37,14 @@ struct WebHashMap {
 }
 
 impl KV::Handler for WebHashMap {
-    async fn get(&self, key: String) -> RpcResult<Option<String>> {
+    async fn get(&self, key: String) -> Option<String> {
         let map = self.map.lock().unwrap();
-        Ok(map.get(&key).cloned())
+        map.get(&key).cloned()
     }
 
-    async fn set(&self, key: String, value: String) -> RpcResult<()> {
+    async fn set(&self, key: String, value: String) {
         let mut map = self.map.lock().unwrap();
         map.insert(key, value);
-        Ok(())
     }
 }
 

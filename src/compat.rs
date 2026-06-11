@@ -94,6 +94,42 @@ pub mod kanal {
     }
 }
 
+// #[cfg(feature = "tower")]
+// mod tower {
+//     use std::{
+//         marker::PhantomData,
+//         pin::Pin,
+//         task::{Context, Poll},
+//     };
+
+//     pub struct Adapt<T, S>(T, PhantomData<S>);
+//     pub fn adapt<T, S>(handler: T) -> Adapt<T, S>
+//     where
+//         S: crate::rpc::Service,
+//         T: crate::rpc::Handler<S>,
+//     {
+//         Adapt(handler, PhantomData)
+//     }
+
+//     impl<T, S> tower_service::Service<S::Request> for Adapt<T, S>
+//     where
+//         S: crate::rpc::Service,
+//         T: crate::rpc::Handler<S>,
+//     {
+//         type Future = Pin<Box<dyn Future<Output = eyre::Result<S::Response>>>>;
+//         type Response = S::Response;
+//         type Error = eyre::Error;
+
+//         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//             Poll::Ready(Ok(()))
+//         }
+
+//         fn call(&mut self, req: S::Request) -> impl Future<Output = eyre::Result<S::Response>> {
+//             self.0.handle(req)
+//         }
+//     }
+// }
+
 #[cfg(feature = "wasm")]
 pub mod wasm {
     use std::any::type_name_of_val;

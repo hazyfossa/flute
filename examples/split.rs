@@ -1,4 +1,4 @@
-use flute::{define_rpc, rpc::RpcResult};
+use flute::define_rpc;
 
 define_rpc!(
     #[split_handler]
@@ -11,15 +11,15 @@ define_rpc!(
 struct CommonState {}
 
 impl Service::split_handler::complex for CommonState {
-    async fn handle(&self, input: (u64, u64)) -> RpcResult<u128> {
+    async fn handle(&self, input: (u64, u64)) -> u128 {
         // Pretend this is a very long function definition
-        Ok((input.0 + input.1) as _)
+        (input.0 + input.1) as _
     }
 }
 
 impl Service::split_handler::echo for CommonState {
-    async fn handle(&self, something: String) -> RpcResult<String> {
-        Ok(something)
+    async fn handle(&self, something: String) -> String {
+        something
     }
 }
 

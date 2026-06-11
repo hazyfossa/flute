@@ -56,7 +56,44 @@ where
     }
 }
 
+// TODO: this hatch is naive.
+// With color-eyre, it will send color codes over the wire.
+// With snafu, snafu::Report is not applied.
+//
+// TODO: this hatch is not a proper std Error
+// we will most likely need a special case in client codegen
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct RpcErrorHatch {
+    pub message: String,
+}
+
+impl<T: Debug> From<T> for RpcErrorHatch {
+    fn from(value: T) -> Self {
+        Self {
+            message: format!("{value:?}"),
+        }
+    }
+}
+
+pub type RpcResult<T> = std::result::Result<T, RpcErrorHatch>;
+
+#[derive(Debug, Error)]
+pub enum ClientError {
+    #[error("{0}")]
+    CallerError(eyre::Error),
+
+    #[error("{message}")]
+    FunctionError { message: String },
+
+    #[error("got invalid response: expected {expected}, got: {got}")]
+    ProtocolError {
+        expected: &'static str,
+        got: &'static str,
+    },
+}
+
 pub trait Handler<S: Service + ?Sized> {
+    // TODO: consider Handler: ErrorProvider
     async fn handle(&self, request: S::Request) -> S::Response;
 }
 
@@ -77,7 +114,7 @@ macro_rules! define_rpc {
         pub trait Handler
         {
             $(
-                async fn $function(&self, $($field: $field_type),*) -> RpcResult<$response>;
+                async fn $function(&self, $($field: $field_type),*) -> $response;
             )*
         }
 
@@ -88,7 +125,6 @@ macro_rules! define_rpc {
 
         #[derive(serde::Serialize, serde::Deserialize)]
         pub enum Response {
-            _Error { message: String },
             $($function($response)),*
         }
 
@@ -112,13 +148,7 @@ macro_rules! define_rpc {
                 match request {
                     $(Request::$function { $($field),* } => {
                         let ret = self.0.$function($($field),*).await;
-
-                        let response = match ret {
-                            Ok(value) => Response::$function(value),
-                            Err(e) => Response::_Error { message: e.message },
-                        };
-
-                        response
+                        Response::$function(ret)
                     }),*
                 }
             }
@@ -157,8 +187,6 @@ macro_rules! define_rpc {
                 {
                     Response::$function(ret) => Ok(ret),
 
-                    Response::_Error { message } => Err(ClientError::FunctionError { message }),
-
                     other => Err(ClientError::ProtocolError {
                         expected: stringify!($function),
                         got: std::any::type_name_of_val(&other)
@@ -172,11 +200,11 @@ macro_rules! define_rpc {
             pub mod split_handler {
                 use super::*;
                 $(pub trait $function {
-                    async fn handle(&self, $($field: $field_type),*) -> super::RpcResult<$response>;
+                    async fn handle(&self, $($field: $field_type),*) -> $response;
                 })*
 
                 impl<T> super::Handler for T where T: $($function +)* {
-                    $(fn $function(&self, $($field: $field_type),*) -> impl Future<Output = super::RpcResult<$response>> {
+                    $(fn $function(&self, $($field: $field_type),*) -> impl Future<Output = $response> {
                         <Self as $function>::handle(self, $($field),*)
                     })*
                 }
@@ -207,33 +235,4 @@ macro_rules! define_rpc {
         macro_rules! __with_dollar_sign { $($body)* }
         __with_dollar_sign!($);
     }
-}
-
-pub struct RpcErrorHatch {
-    pub message: String,
-}
-
-impl<T: Debug> From<T> for RpcErrorHatch {
-    fn from(value: T) -> Self {
-        Self {
-            message: format!("{value:?}"),
-        }
-    }
-}
-
-pub type RpcResult<T> = std::result::Result<T, RpcErrorHatch>;
-
-#[derive(Debug, Error)]
-pub enum ClientError {
-    #[error("{0}")]
-    CallerError(eyre::Error),
-
-    #[error("{message}")]
-    FunctionError { message: String },
-
-    #[error("got invalid response: expected {expected}, got: {got}")]
-    ProtocolError {
-        expected: &'static str,
-        got: &'static str,
-    },
 }

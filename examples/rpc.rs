@@ -7,31 +7,35 @@ use flute::{
 define_rpc!(Simple {
     fn echo(something: String) -> String;
 
+    // RpcResult is a convenient way to specify a function which is fallible.
+    // It will format the error via it's Debug impl and send the full string over the wire.
+    //
+    // You can also use std Result for better efficiency.
+    // Just remember to derive(Serialize, Deserialize) on your error.
+    fn fallible() -> RpcResult<()>;
+
     // Note that you must always specify an explicit return type.
     // If your function does not return anything, specify "-> ()"
     //
     // This reflects on the fact that even for empty return bodies,
-    // an acknowledgement and (optionally) an in-band error will be transmitted.
+    // an acknowledgement of completion will be transmitted.
     fn empty() -> ();
 });
 
 // To define a server, implement the Handler trait.
 struct Server;
 impl Simple::Handler for Server {
-    // All RPC functions are fallible by default.
-    // This means that a handler always has an option to return an error.
-    // You should always return an error instead of panicking or unwrapping (where possible).
-    //
-    // RpcResult will convert any error to a string via Debug, then send it on the wire.
-    //
-    // This is expected to change once we finalize our error handling scheme.
-    async fn echo(&self, something: String) -> RpcResult<String> {
-        Ok(something)
+    // All handler functions are allowed to be async
+    async fn echo(&self, something: String) -> String {
+        something
     }
 
-    async fn empty(&self) -> RpcResult<()> {
-        // The error will still be transmitted
-        Err("this function is empty")?
+    async fn fallible(&self) -> RpcResult<()> {
+        Err("This function failed")?
+    }
+
+    async fn empty(&self) {
+        print!("Doing nothing");
     }
 }
 
