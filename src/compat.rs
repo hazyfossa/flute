@@ -86,11 +86,13 @@ pub mod kanal {
     pub type KanalWire<T> = merge::Merged<AsyncSender<T>, AsyncReceiver<T>>;
 
     pub fn unbounded<T>() -> KanalWire<T> {
-        merge::merge(kanal::unbounded_async())
+        let (tx, rx) = kanal::unbounded_async();
+        merge::merge(tx, rx)
     }
 
     pub fn bounded<T>(size: usize) -> KanalWire<T> {
-        merge::merge(kanal::bounded_async(size))
+        let (tx, rx) = kanal::bounded_async(size);
+        merge::merge(tx, rx)
     }
 }
 

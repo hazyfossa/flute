@@ -26,15 +26,17 @@ See `examples/rpc.rs` to learn more.
 - [x] Futures Stream+Sink compat
 - [x] Dynamic channels
 - [x] In-band error handling (fallible RPC)
-- [ ] Better wire encoding for errors
+- [x] Better wire encoding for errors
 
 V2:
+- [x] Arbitrary callers
 - [ ] Batching
 - [ ] Streaming responses
 - [ ] Transport muxing
 
 V3:
-- [ ] completion-based io primitives (proper work on performance delayed until this)
+- [ ] Uni-directional channels
+- [ ] Requests without response
 
 # Non-goals
 - Defining our own transport

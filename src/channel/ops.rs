@@ -49,12 +49,12 @@ pub mod merge {
         }
     }
 
-    pub fn merge<A, B>(s: (A, B)) -> Merged<A, B>
+    pub fn merge<A, B>(tx: A, rx: B) -> Merged<A, B>
     where
         A: Tx,
         B: Rx,
     {
-        Merged { tx: s.0, rx: s.1 }
+        Merged { tx, rx }
     }
 }
 
@@ -72,6 +72,6 @@ pub mod cross {
         let (a_tx, a_rx) = a.split();
         let (b_tx, b_rx) = b.split();
 
-        (merge((a_tx, b_rx)), merge((b_tx, a_rx)))
+        (merge(a_tx, b_rx), merge(b_tx, a_rx))
     }
 }
