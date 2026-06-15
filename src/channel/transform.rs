@@ -1,3 +1,4 @@
+use crate::state::Stateless;
 use crate::{Channel, Rx, Tx, error::ErrorProvider, ops::split::Split};
 
 pub trait Transform: ErrorProvider {
@@ -83,16 +84,6 @@ where
 }
 
 // stateless transform optimizations
-
-// TODO: ponder
-pub trait Stateless: Sized {
-    fn stateless() -> Self {
-        const { assert!(core::mem::size_of::<Self>() == 0) }
-
-        // SAFETY: The `assert!` above guarantees `T` is zero-sized.
-        unsafe { core::mem::zeroed() }
-    }
-}
 
 impl<I, T> Transformed<I, T> {
     pub fn new(inner: I) -> Self

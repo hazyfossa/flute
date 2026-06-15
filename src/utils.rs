@@ -5,16 +5,17 @@ mod macros {
     macro_rules! trait_alias {
         (
             $(#[$($attr:meta)*])?
-            $vis:vis trait $name:ident $(<$($generic:ident),*>)? : $($for:tt)*
+            $vis:vis trait $name:ident $(< $($life:lifetime)? $(,)? $($generic:ident),* >)? : $($for:tt)*
             $(where $($generic_bound:tt)+)?
         ) => {
                 $(#[$($attr)*])?
-                $vis trait $name $(<$($generic,)+>)?: $($for)* {}
+                $vis trait $name $(< $($life,)* $($generic,)*>)?: $($for)* {}
                 impl<
+                    $($($life,)?)?
                     Impl,
-                    $($($generic,)+)?
+                    $($($generic,)*)?
                 >
-                $name $(<$($generic),+>)?
+                $name $(< $($life,)? $($generic),* >)?
                 for Impl where
                     Impl: $($for)*,
                     $($($generic_bound)+)?
@@ -74,5 +75,18 @@ pub mod error {
         v_impl!(A B C D E F G);
         v_impl!(A B C D E F G H);
         v_impl!(A B C D E F G H I);
+    }
+}
+
+pub mod state {
+
+    // TODO: ponder
+    pub trait Stateless: Sized {
+        fn stateless() -> Self {
+            const { assert!(core::mem::size_of::<Self>() == 0) }
+
+            // SAFETY: The `assert!` above guarantees `T` is zero-sized.
+            unsafe { core::mem::zeroed() }
+        }
     }
 }
