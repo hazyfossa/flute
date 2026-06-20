@@ -1,4 +1,3 @@
-#![allow(async_fn_in_trait)]
 // TODO: channel setup flow. Server/Client-tagged channels?
 
 use std::fmt::Debug;

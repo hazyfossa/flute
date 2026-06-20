@@ -57,9 +57,10 @@ pub mod error {
     }
 
     mod variadics {
+        use super::*;
         macro_rules! v_impl {
             ($($t:ident)*) => {
-                impl<$($t,)*> super::ErrorProvider for ( $($t,)* ) {
+                impl<$($t,)*> ErrorProvider for ( $($t,)* ) {
                     type Error = eyre::Error;
                     fn name() -> Option<&'static str> { None }
                 }
@@ -88,5 +89,29 @@ pub mod state {
             // SAFETY: The `assert!` above guarantees `T` is zero-sized.
             unsafe { core::mem::zeroed() }
         }
+    }
+
+    mod variadics {
+        use super::*;
+        macro_rules! v_impl {
+            ($($t:ident)*) => {
+                impl<$($t,)*> Stateless for ( $($t,)* )
+                where $($t: Stateless,)* {
+                    fn stateless() -> Self {
+                        ($($t::stateless(),)*)
+                    }
+                }
+            };
+        }
+
+        v_impl!(A);
+        v_impl!(A B);
+        v_impl!(A B C);
+        v_impl!(A B C D);
+        v_impl!(A B C D E);
+        v_impl!(A B C D E F);
+        v_impl!(A B C D E F G);
+        v_impl!(A B C D E F G H);
+        v_impl!(A B C D E F G H I);
     }
 }

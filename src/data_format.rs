@@ -40,10 +40,10 @@ pub mod json {
 pub mod postcard {
     use super::*;
 
-    pub struct Postcard<const COBS: bool = false>;
+    pub struct Postcard;
 
-    impl<const ANY: bool> Stateless for Postcard</* cobs: */ ANY> {}
-    impl<const ANY: bool> ErrorProvider for Postcard</* cobs: */ ANY> {
+    impl Stateless for Postcard {}
+    impl ErrorProvider for Postcard {
         type Error = ::postcard::Error;
     }
 
@@ -59,21 +59,6 @@ pub mod postcard {
 
         fn decode(wire: Self::Wire) -> Result<V, Self::Error> {
             ::postcard::from_bytes(&wire)
-        }
-    }
-
-    impl<V> DataFormat<V> for Postcard</* cobs: */ true>
-    where
-        V: serde::Serialize + serde::de::DeserializeOwned,
-    {
-        type Wire = Vec<u8>;
-
-        fn encode(value: V) -> Result<Self::Wire, Self::Error> {
-            ::postcard::to_stdvec_cobs(&value)
-        }
-
-        fn decode(mut wire: Self::Wire) -> Result<V, Self::Error> {
-            ::postcard::from_bytes_cobs(&mut wire)
         }
     }
 }

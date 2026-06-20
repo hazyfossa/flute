@@ -1,5 +1,3 @@
-#![allow(async_fn_in_trait)]
-
 pub mod dynamic;
 pub mod ops;
 pub mod transform;

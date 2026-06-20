@@ -216,11 +216,11 @@ macro_rules! var_impl {
     // 2. Keeping a return value $ret, for each next ident
     // prepend a line to the beginning of the return value
     // effectively building $ret in reverse order
-    (@decode_chain [$($ret:tt)*] {$data:ident} $head:ident $($tail:ident)*) => {
+    (@decode_chain [$($ret:tt)*] {$data:ident} $current:ident $($next:ident)*) => {
         var_impl!(@decode_chain [
-            let $data = $head.decode($data).erase_with_provider::<$head>()?;
+            let $data = $current.decode($data).erase_with_provider::<$current>()?;
             $($ret)*
-        ] {$data} $($tail)*);
+        ] {$data} $($next)*);
     };
 
     // 1. Initialize the macro with $ret as an empty value
