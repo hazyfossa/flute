@@ -42,12 +42,26 @@ unsafe fn slice_assume_init(slice: &[byte]) -> &[u8] {
     unsafe { &*(slice as *const [byte] as *const [u8]) }
 }
 
+/// # Safety
+///
+/// The caller must ensure that `slice` is fully initialized.
+unsafe fn slice_assume_init_mut(slice: &mut [byte]) -> &mut [u8] {
+    // SAFETY: `MaybeUninit<u8>` has the same memory layout as `u8`, and the caller
+    // promises that `slice` is fully initialized.
+    unsafe { &mut *(slice as *mut [byte] as *mut [u8]) }
+}
+
+// TODO: assertions about bounds, probably split const INIT for readability
+
 /// The layout of Buf can be viewed as
 /// [   data   |  init-junk  |     uninit     ]
 /// [   data   |         tx-capacity          ]
 /// [        init            |     uninit     ]
+//
 // TODO: consider replacing T here with something concrete.. ArrayVec?
+//
 // TODO: consider replacing init_end with const INIT: bool (do not support partial init)
+// this essentially propagates the const from BufTx to Buf
 pub struct Buf<T> {
     inner: T,
     data_end: usize,
@@ -77,6 +91,33 @@ impl<T: Memory> Buf<T> {
             data_end: 0,
         }
     }
+
+    pub fn open_tx(&mut self) -> BufTx<'_, T> {
+        BufTx {
+            buf: self,
+            written: 0,
+        }
+    }
+
+    pub fn open_tx_partial_init(&mut self, len: usize) -> BufTx<'_, T, true> {
+        let start = self.init_end.max(self.data_end);
+        let end = start + len; // TODO: this can overflow
+
+        unsafe {
+            self.inner[start..end]
+                .as_mut_ptr()
+                .write_bytes(0, end - start);
+        }
+
+        BufTx {
+            buf: self,
+            written: 0,
+        }
+    }
+
+    pub fn open_tx_init(&mut self) -> BufTx<'_, T, true> {
+        self.open_tx_partial_init(self.len())
+    }
 }
 
 // TODO: this should be replaced by scatter/gather (vectored io)
@@ -89,32 +130,20 @@ impl<T: Extend<byte>> Extend<byte> for Buf<T> {
 // Transaction
 
 // TODO: Tx is confusing here: in flute it means Transmitter, here Transaction
-pub struct BufTx<'a, T> {
+pub struct BufTx<'a, T, const INIT: bool = false> {
     buf: &'a mut Buf<T>,
 
-    // invariant: does not overflow `buf.len` or `usize`
+    // invariant: does not overflow `self.end()` or `usize`
     // when added to `buf.filled`
     written: usize,
 }
 
-impl<'a, T: Memory> BufTx<'a, T> {
-    /// Safety: while handling memory returned from here,
-    /// you should never de-initialize bytes.
-    ///
-    /// The function itself is safe, but buffer layout
-    /// requires [init | uninit] as continuous slices,
-    /// so de-initializing arbitrary bytes makes `confirm` instant UB.
-    pub fn substrate(&mut self) -> &mut [byte] {
-        // Safety: overflow here is impossible per invariant of `self.written`
-        unsafe {
-            let start = self.buf.data_end.unchecked_add(self.written);
-            self.buf.inner.get_unchecked_mut(start..)
+impl<'a, T: Memory, const INIT: bool> BufTx<'a, T, INIT> {
+    fn end(&self) -> usize {
+        match INIT {
+            true => self.buf.len(),
+            false => self.buf.init_end,
         }
-    }
-
-    /// Safety: notes from `self.remaining` apply.
-    pub fn as_ptr(&mut self) -> *mut [byte] {
-        self.substrate() as _
     }
 
     #[inline]
@@ -128,10 +157,12 @@ impl<'a, T: Memory> BufTx<'a, T> {
     pub fn capacity(&self) -> usize {
         // NOTE: we deliberately do not implement this as a call to `self.substrate().len()`
         // to allow `self.substrate()` to be unchecked.
-        let total = self.buf.len();
 
-        // TODO: here underflow is possible, meaning usize will overflow upon advance
-        total - self.buf.data_end - self.written
+        // TODO: here underflow is possible, meaning either
+        // (1) buffer does not have enough space to handle the advance (happens with `INIT==true`)
+        // (2) usize will overflow upon advance
+        //        (1)                 (2)
+        self.end() - self.buf.data_end - self.written
     }
 
     /// On failure, returns the overflow
@@ -149,13 +180,25 @@ impl<'a, T: Memory> BufTx<'a, T> {
         }
     }
 
-    /// This function confirms the transaction,
-    /// returning the total amount of new bytes added to buffer
-    ///
-    /// Safety: by confirming, you guarantee that this transaction's memory
-    /// (as returned by self.substrate()) now contains exactly `self.written()`
-    /// initialized bytes (continuous, starting from beginning)
-    pub unsafe fn confirm(self) -> usize {
+    // The final signatures of the following functions vary on `const INIT`
+
+    fn substrate_impl(&mut self) -> &mut [byte] {
+        // Safety: overflow here is impossible per invariant of `self.written`
+        unsafe {
+            let start = self.buf.data_end.unchecked_add(self.written);
+            let end = self.end();
+
+            // TODO: although i have an idea why this range is always valid here,
+            // it is difficult to reason about, since we allow buf.init_end < buf.data_end
+            // is it sane to specify INIT == true implies buf.init_end >= buf.data_end???
+
+            // TODO: do we lose perf here due to not using RangeFrom in the INIT == false case?
+            self.buf.inner.get_unchecked_mut(start..end)
+        }
+    }
+
+    // Safety: see (INIT == false)
+    pub unsafe fn confirm_impl(self) -> usize {
         // Safety: this will never overflow by invariant of `written`
         unsafe { self.buf.data_end = self.buf.data_end.unchecked_add(self.written) };
 
@@ -165,12 +208,44 @@ impl<'a, T: Memory> BufTx<'a, T> {
     }
 }
 
-impl<T: Memory> Buf<T> {
-    pub fn open_tx(&mut self) -> BufTx<'_, T> {
-        BufTx {
-            buf: self,
-            written: 0,
-        }
+// On INIT == false, do not provide any additional guarantees
+impl<'a, T: Memory> BufTx<'a, T, false> {
+    /// Safety: while handling memory returned from here,
+    /// you should never de-initialize bytes.
+    ///
+    /// The function itself is safe, but buffer layout
+    /// requires [init | uninit] as continuous slices,
+    /// so de-initializing arbitrary bytes makes `confirm` instant UB.
+    pub fn substrate(&mut self) -> &mut [byte] {
+        self.substrate_impl()
+    }
+
+    // Saefty: notes from `self.substrate()` apply
+    pub fn as_prt(&mut self) -> *mut [byte] {
+        self.substrate() as _
+    }
+
+    /// This function confirms the transaction,
+    /// returning the total amount of new bytes added to buffer
+    ///
+    /// Safety: by confirming, you guarantee that this transaction's memory
+    /// (as returned by self.substrate()) now contains exactly `self.written()`
+    /// initialized bytes (continuous, starting from beginning)
+    pub unsafe fn confirm(self) -> usize {
+        unsafe { self.confirm_impl() }
+    }
+}
+
+impl<'a, T: Memory> BufTx<'a, T, true> {
+    pub fn substrate(&mut self) -> &mut [u8] {
+        // TODO: safety unclear, see `substrate_impl`
+        unsafe { slice_assume_init_mut(self.substrate_impl()) }
+    }
+
+    pub fn confirm(self) -> usize {
+        // Safety: since substrate of (INIT == true) transactions
+        // is always fully initialized, this is always safe
+        unsafe { self.confirm_impl() }
     }
 }
 
