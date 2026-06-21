@@ -42,16 +42,20 @@ unsafe fn slice_assume_init(slice: &[byte]) -> &[u8] {
     unsafe { &*(slice as *const [byte] as *const [u8]) }
 }
 
-// The layout of Buf can be viewed as
-// [   data   |  init-junk  |     uninit     ]
-// [   data   |         tx-capacity          ]
-// [        init            |     uninit     ]
+/// The layout of Buf can be viewed as
+/// [   data   |  init-junk  |     uninit     ]
+/// [   data   |         tx-capacity          ]
+/// [        init            |     uninit     ]
+// TODO: consider replacing T here with something concrete.. ArrayVec?
+// TODO: consider replacing init_end with const INIT: bool (do not support partial init)
 pub struct Buf<T> {
     inner: T,
-    init: usize,
-    filled: usize,
+    data_end: usize,
+
+    // note: init_end <= data_end means this buffer does not have
+    // excess init bytes (all of them are relevant data)
+    init_end: usize,
 }
-// TODO: consider replacing T here with something concrete.. ArrayVec?
 
 // Buffer itself is memory
 impl<T: Memory> Deref for Buf<T> {
@@ -69,8 +73,8 @@ impl<T: Memory> Buf<T> {
     pub fn new(memory: T) -> Self {
         Self {
             inner: memory,
-            init: 0,
-            filled: 0,
+            init_end: 0,
+            data_end: 0,
         }
     }
 }
@@ -88,7 +92,7 @@ impl<T: Extend<byte>> Extend<byte> for Buf<T> {
 pub struct BufTx<'a, T> {
     buf: &'a mut Buf<T>,
 
-    // Safety (invariant): does not overflow `buf.len` or `usize`
+    // invariant: does not overflow `buf.len` or `usize`
     // when added to `buf.filled`
     written: usize,
 }
@@ -101,11 +105,11 @@ impl<'a, T: Memory> BufTx<'a, T> {
     /// requires [init | uninit] as continuous slices,
     /// so de-initializing arbitrary bytes makes `confirm` instant UB.
     pub fn substrate(&mut self) -> &mut [byte] {
-        let start = self.buf.filled + self.written;
-
-        // Safety: buf.filled does not overflow by invariant of Buf,
-        // self.written does not overflow by invariant of BufTx
-        unsafe { self.buf.inner.get_unchecked_mut(start..) }
+        // Safety: overflow here is impossible per invariant of `self.written`
+        unsafe {
+            let start = self.buf.data_end.unchecked_add(self.written);
+            self.buf.inner.get_unchecked_mut(start..)
+        }
     }
 
     /// Safety: notes from `self.remaining` apply.
@@ -118,10 +122,16 @@ impl<'a, T: Memory> BufTx<'a, T> {
         self.written
     }
 
+    /// Capacity is `self.substrate().len()`
+    /// It is decreased upon `self.advance()`
     #[inline]
     pub fn capacity(&self) -> usize {
+        // NOTE: we deliberately do not implement this as a call to `self.substrate().len()`
+        // to allow `self.substrate()` to be unchecked.
         let total = self.buf.len();
-        total - self.buf.filled - self.written
+
+        // TODO: here underflow is possible, meaning usize will overflow upon advance
+        total - self.buf.data_end - self.written
     }
 
     /// On failure, returns the overflow
@@ -147,12 +157,10 @@ impl<'a, T: Memory> BufTx<'a, T> {
     /// initialized bytes (continuous, starting from beginning)
     pub unsafe fn confirm(self) -> usize {
         // Safety: this will never overflow by invariant of `written`
-        unsafe { self.buf.filled = self.buf.filled.unchecked_add(self.written) };
+        unsafe { self.buf.data_end = self.buf.data_end.unchecked_add(self.written) };
 
-        // TODO: consider not clamping here and instead doing arithmetic in request_init
-        // Cons: non-trivial logic
-        // Pros: moves the perf burden from common case (uninit) to API shim (init)
-        self.buf.init = self.buf.init.max(self.buf.filled);
+        // Note: self.buf.init_end is not clamped here. This is intentional.
+
         self.written
     }
 }
@@ -172,7 +180,7 @@ pub type MemoryView<T> = yoke::Yoke<&'static [u8], Buf<T>>;
 
 impl<T: Memory> Buf<T> {
     pub fn data(self) -> MemoryView<T> {
-        let filled = self.filled;
+        let filled = self.data_end;
 
         yoke::Yoke::attach_to_cart(self, |buf: &[byte]| {
             // Safety: self.filled will never overflow buf.len
