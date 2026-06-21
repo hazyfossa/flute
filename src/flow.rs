@@ -3,11 +3,7 @@
 // This means you're way more likely to interact with channels instead.
 
 use stable_deref_trait::StableDeref;
-use std::{
-    ffi::c_void,
-    ops::{Deref, DerefMut},
-};
-use yoke::Yoke;
+use std::ops::{Deref, DerefMut};
 
 use crate::{error::ErrorProvider, trait_alias};
 
@@ -47,15 +43,15 @@ unsafe fn slice_assume_init(slice: &[byte]) -> &[u8] {
 }
 
 // The layout of Buf can be viewed as
-// [  data  |  init-junk  |     uninit      ]
-// [  data  |        tx-capacity            ]
-// [       init           |     uninit      ]
-// TODO: consider replacing T here with something concrete.. ArrayVec?
+// [   data   |  init-junk  |     uninit     ]
+// [   data   |         tx-capacity          ]
+// [        init            |     uninit     ]
 pub struct Buf<T> {
     inner: T,
     init: usize,
     filled: usize,
 }
+// TODO: consider replacing T here with something concrete.. ArrayVec?
 
 // Buffer itself is memory
 impl<T: Memory> Deref for Buf<T> {
@@ -89,10 +85,12 @@ impl<T: Extend<byte>> Extend<byte> for Buf<T> {
 // Transaction
 
 // TODO: Tx is confusing here: in flute it means Transmitter, here Transaction
-// TODO: think of a better name than transaction, as there is no rollback here
 pub struct BufTx<'a, T> {
     buf: &'a mut Buf<T>,
-    pub written: usize,
+
+    // Safety (invariant): does not overflow `buf.len` or `usize`
+    // when added to `buf.filled`
+    written: usize,
 }
 
 impl<'a, T: Memory> BufTx<'a, T> {
@@ -104,7 +102,10 @@ impl<'a, T: Memory> BufTx<'a, T> {
     /// so de-initializing arbitrary bytes makes `confirm` instant UB.
     pub fn substrate(&mut self) -> &mut [byte] {
         let start = self.buf.filled + self.written;
-        &mut self.buf.inner[start..]
+
+        // Safety: buf.filled does not overflow by invariant of Buf,
+        // self.written does not overflow by invariant of BufTx
+        unsafe { self.buf.inner.get_unchecked_mut(start..) }
     }
 
     /// Safety: notes from `self.remaining` apply.
@@ -112,25 +113,40 @@ impl<'a, T: Memory> BufTx<'a, T> {
         self.substrate() as _
     }
 
-    pub fn advance(&mut self, by: usize) {
-        // TODO: check how much perf we lose with this check
-        // read loops are expected to be broken by syscall, so shouldn't be much
-        // alternatives:
-        // 1. saturated_add -> we risk arbitrary data loss
-        // 2. advance_unchecked + remaining_capacity -> complex api
+    #[inline]
+    pub fn written(&self) -> usize {
         self.written
-            .checked_add(by)
-            .expect("cannot advance buffer transaction: usize overflow");
+    }
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        let total = self.buf.len();
+        total - self.buf.filled - self.written
+    }
+
+    /// On failure, returns the overflow
+    /// i.e. by how many bytes the capacity should increase
+    /// for the advancement to be possible
+    // TODO: consider propagating overflow of usize (which is underflow in capacity)
+    // TODO: consider if unsafe advance_unchecked is even possible in a sane manner
+    pub fn advance(&mut self, by: usize) -> Result<(), usize> {
+        if by > self.capacity() {
+            Err(self.capacity() - by)
+        } else {
+            // Safety: this will never overflow, guarded by capacity check above
+            unsafe { self.written = self.written.unchecked_add(by) }
+            Ok(())
+        }
     }
 
     /// This function confirms the transaction,
     /// returning the total amount of new bytes added to buffer
     ///
     /// Safety: by confirming, you guarantee that this transaction's memory
-    /// (as returned by self.substrate()) now contains exactly `self.written`
+    /// (as returned by self.substrate()) now contains exactly `self.written()`
     /// initialized bytes (continuous, starting from beginning)
     pub unsafe fn confirm(self) -> usize {
-        // Safety: this will never overflow, guarded by capacity check in `advance`
+        // Safety: this will never overflow by invariant of `written`
         unsafe { self.buf.filled = self.buf.filled.unchecked_add(self.written) };
 
         // TODO: consider not clamping here and instead doing arithmetic in request_init
@@ -141,16 +157,27 @@ impl<'a, T: Memory> BufTx<'a, T> {
     }
 }
 
+impl<T: Memory> Buf<T> {
+    pub fn open_tx(&mut self) -> BufTx<'_, T> {
+        BufTx {
+            buf: self,
+            written: 0,
+        }
+    }
+}
+
 // View
 
-pub type MemoryView<T> = Yoke<&'static [u8], Buf<T>>;
+pub type MemoryView<T> = yoke::Yoke<&'static [u8], Buf<T>>;
 
 impl<T: Memory> Buf<T> {
     pub fn data(self) -> MemoryView<T> {
         let filled = self.filled;
 
-        Yoke::attach_to_cart(self, |buf: &[byte]| {
-            let slice = &buf[..filled];
+        yoke::Yoke::attach_to_cart(self, |buf: &[byte]| {
+            // Safety: self.filled will never overflow buf.len
+            let slice = unsafe { buf.get_unchecked(..filled) };
+
             // Safety: [filled] is a subset of [init]
             unsafe { slice_assume_init(slice) }
         })
