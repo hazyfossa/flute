@@ -62,6 +62,8 @@ unsafe fn slice_assume_init_mut(slice: &mut [byte]) -> &mut [u8] {
 //
 // TODO: consider replacing init_end with const INIT: bool (do not support partial init)
 // this essentially propagates the const from BufTx to Buf
+// Pros: encodes performance characteristics in signature
+// Cons: inconvenient generics
 pub struct Buf<T> {
     inner: T,
     data_end: usize,
@@ -72,6 +74,7 @@ pub struct Buf<T> {
 }
 
 // Buffer itself is memory
+// TODO: this is problematic for IDE hints, but is required by yoke
 impl<T: Memory> Deref for Buf<T> {
     type Target = [byte];
 
@@ -151,15 +154,15 @@ impl<'a, T: Memory, const INIT: bool> BufTx<'a, T, INIT> {
         self.written
     }
 
-    /// Capacity is `self.substrate().len()`
+    /// Remaining is `self.substrate().len()`
     /// It is decreased upon `self.advance()`
     #[inline]
-    pub fn capacity(&self) -> usize {
+    pub fn remaining(&self) -> usize {
         // NOTE: we deliberately do not implement this as a call to `self.substrate().len()`
         // to allow `self.substrate()` to be unchecked.
 
         // TODO: here underflow is possible, meaning either
-        // (1) buffer does not have enough space to handle the advance (happens with `INIT==true`)
+        // (1) buffer does not have enough space to handle the advance (happens with `INIT == true`)
         // (2) usize will overflow upon advance
         //        (1)                 (2)
         self.end() - self.buf.data_end - self.written
@@ -171,8 +174,8 @@ impl<'a, T: Memory, const INIT: bool> BufTx<'a, T, INIT> {
     // TODO: consider propagating overflow of usize (which is underflow in capacity)
     // TODO: consider if unsafe advance_unchecked is even possible in a sane manner
     pub fn advance(&mut self, by: usize) -> Result<(), usize> {
-        if by > self.capacity() {
-            Err(self.capacity() - by)
+        if by > self.remaining() {
+            Err(self.remaining() - by)
         } else {
             // Safety: this will never overflow, guarded by capacity check above
             unsafe { self.written = self.written.unchecked_add(by) }
@@ -221,7 +224,7 @@ impl<'a, T: Memory> BufTx<'a, T, false> {
     }
 
     // Saefty: notes from `self.substrate()` apply
-    pub fn as_prt(&mut self) -> *mut [byte] {
+    pub fn as_ptr(&mut self) -> *mut [byte] {
         self.substrate() as _
     }
 
@@ -267,12 +270,15 @@ impl<T: Memory> Buf<T> {
     }
 }
 
+// TODO: the usize rets are redundant, we store that info in the buffer
+// counterargument: EOF detection
+
 pub trait FlowRx: ErrorProvider {
-    async fn recv<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<(), Self::Error>;
+    async fn recv<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<usize, Self::Error>;
 }
 
 pub trait FlowTx: ErrorProvider {
-    async fn send(&mut self, buf: &[u8]) -> Result<(), Self::Error>;
+    async fn send<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<usize, Self::Error>;
 }
 
 mod frame {
@@ -283,5 +289,30 @@ mod frame {
         flow: F,
         size: usize,
         buf: Vec<u8>, // TODO: alloc
+    }
+}
+
+#[cfg(feature = "tokio")]
+pub mod tokio {
+    use super::{Buf, FlowRx, FlowTx, Memory};
+    use crate::error::ErrorProvider;
+    use tokio::io::ReadBuf as TokioBuf;
+
+    pub struct Adapt<T>(T);
+
+    impl<T> ErrorProvider for Adapt<T> {
+        type Error = tokio::io::Error;
+    }
+
+    impl<T: tokio::io::AsyncRead + Unpin> FlowRx for Adapt<T> {
+        async fn recv<M: Memory>(&mut self, buf: &mut Buf<M>) -> Result<usize, Self::Error> {
+            let mut buf = buf.open_tx();
+            let mut buf = TokioBuf::uninit(buf.substrate());
+
+            use tokio::io::AsyncReadExt;
+            let ret = self.0.read_buf(&mut buf).await?;
+
+            Ok(ret)
+        }
     }
 }
