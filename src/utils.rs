@@ -135,3 +135,29 @@ pub mod branches {
         b
     }
 }
+
+pub mod delayed_mut {
+    use std::{marker::PhantomData, ptr};
+
+    pub struct DelayedMut<'a, T> {
+        raw: *mut T,
+        _life: PhantomData<&'a mut ()>,
+    }
+
+    impl<'a, T> From<&'a mut T> for DelayedMut<'a, T> {
+        fn from(value: &'a mut T) -> Self {
+            Self {
+                raw: ptr::from_mut(value),
+                _life: PhantomData,
+            }
+        }
+    }
+
+    impl<'a, T> DelayedMut<'a, T> {
+        /// Safety: by calling this method, you guarantee this
+        /// pointer is the only pointer to T
+        pub unsafe fn guarantee_single_instance(self) -> &'a mut T {
+            unsafe { &mut *self.raw }
+        }
+    }
+}
