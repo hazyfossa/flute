@@ -3,9 +3,15 @@
 // This means you're way more likely to interact with channels instead.
 
 use stable_deref_trait::StableDeref;
-use std::ops::{Deref, DerefMut};
+use std::{
+    hint::black_box,
+    marker::PhantomData,
+    ops::{Deref, DerefMut},
+};
+use thiserror::Error;
+use yoke::{Yoke, Yokeable};
 
-use crate::{error::ErrorProvider, trait_alias};
+use crate::{error::ErrorProvider, trait_alias, utils::branches::unlikely};
 
 /// Flute's byte, unlike rust's "u8", has 257 possible states.
 ///
@@ -22,8 +28,7 @@ type byte = std::mem::MaybeUninit<u8>;
 // which is is a non-trivial footgun. This means that either:
 // 1. Buf cannot implement Memory (current) -> does this even matter?
 // 2. Buf cannot safely slice_assume_init on Memory -> we need separate Memory / MemoryMut
-// see also BufTx::remaining
-trait_alias!(pub trait Memory: Deref<Target = [byte]> + DerefMut + StableDeref);
+trait_alias!(pub trait Memory: Deref<Target = [byte]> + DerefMut + StableDeref + 'static);
 
 pub fn alloc_heap(size: usize) -> Box<[byte]> {
     Box::new_uninit_slice(size)
@@ -51,19 +56,96 @@ unsafe fn slice_assume_init_mut(slice: &mut [byte]) -> &mut [u8] {
     unsafe { &mut *(slice as *mut [byte] as *mut [u8]) }
 }
 
+#[derive(Debug, Error)]
+pub enum RollError {
+    #[error("usize overflow")]
+    UsizeOverflow,
+    #[error("buffer overflow")]
+    BufferOverflow { by: usize },
+}
+
+// Roll is a cursor which only goes forwards,
+// making previously accessed parts of a slice inaccessible
+#[derive(Yokeable)]
+struct Roll<T> {
+    inner: T,
+    pub pos: usize,
+}
+
+impl<T> Roll<T> {
+    fn new(inner: T) -> Self {
+        Self { inner, pos: 0 }
+    }
+
+    fn into_inner(self) -> T {
+        self.inner
+    }
+}
+
+impl<T, U> Roll<T>
+where
+    T: Deref<Target = [U]>,
+{
+    #[inline]
+    fn passed(&self) -> usize {
+        self.pos
+    }
+
+    fn remaining(&self) -> usize {
+        self.inner.len() - self.passed()
+    }
+
+    fn advance(&mut self, by: usize) -> Result<(), RollError> {
+        let added = by;
+
+        if unlikely(added > self.remaining()) {
+            return Err(RollError::BufferOverflow {
+                by: added - self.remaining(),
+            });
+        }
+
+        self.pos = self
+            .pos
+            .checked_add(added)
+            .ok_or(RollError::UsizeOverflow)?;
+
+        Ok(())
+    }
+
+    /// Safety: the caller should guaratee that
+    /// 1. self.pos + by does not overflow usize
+    /// 2. `by` does not overflow `self.len()`
+    #[inline]
+    unsafe fn advance_unchecked(&mut self, by: usize) {
+        unsafe { self.pos = self.pos.unchecked_add(by) }
+    }
+
+    #[inline]
+    fn get_ref(&self) -> &[U] {
+        // Safety: self.pos is <= self.inner.len() by invariant
+        unsafe { self.inner.get_unchecked(self.pos..) }
+    }
+}
+
+impl<T, U> Roll<T>
+where
+    T: DerefMut<Target = [U]>,
+{
+    #[inline]
+    fn get_mut(&mut self) -> &mut [U] {
+        // Safety: self.pos is <= self.inner.len() by invariant
+        unsafe { self.inner.get_unchecked_mut(self.pos..) }
+    }
+}
+
 // TODO: assertions about bounds, probably split const INIT for readability
 
 /// The layout of Buf can be viewed as
-/// [   data   |  init-junk  |     uninit     ]
-/// [   data   |         tx-capacity          ]
-/// [        init            |     uninit     ]
+/// [   data   |  init-substrate  |     uninit     ]
+/// [   data   |              substrate            ]
+/// [        init                 |     uninit     ]
 //
 // TODO: consider replacing T here with something concrete.. ArrayVec?
-//
-// TODO: consider replacing init_end with const INIT: bool (do not support partial init)
-// this essentially propagates the const from BufTx to Buf
-// Pros: encodes performance characteristics in signature
-// Cons: inconvenient generics
 pub struct Buf<T> {
     inner: T,
     data_end: usize,
@@ -132,143 +214,101 @@ impl<T: Extend<byte>> Extend<byte> for Buf<T> {
 
 // Transaction
 
+// NOTE: we could get rid of yoke here and simplify API. Some approaches
+// 1. unsafe *mut ptr of Buf: works for unsafe confirm, not so much for INIT Tx
+// 2. returning Roll on open_tx, confirm becomes a method on buf -> much more complex confirm safety
+pub type BorrowedRoll<U> = Roll<&'static mut [U]>;
+
 // TODO: Tx is confusing here: in flute it means Transmitter, here Transaction
-pub struct BufTx<'a, T, const INIT: bool = false> {
-    buf: &'a mut Buf<T>,
-
-    // invariant: does not overflow `self.end()` or `usize`
-    // when added to `buf.filled`
-    written: usize,
+// TODO: this currently prohibits async write tx as a limitation of yoke
+pub struct WriteTx<'a, T, U: 'static> {
+    inner: Yoke<BorrowedRoll<U>, &'a mut Buf<T>>,
 }
 
-impl<'a, T: Memory, const INIT: bool> BufTx<'a, T, INIT> {
-    fn end(&self) -> usize {
-        match INIT {
-            true => self.buf.len(),
-            false => self.buf.init_end,
-        }
-    }
-
-    #[inline]
+impl<'a, T: Memory, U> WriteTx<'a, T, U> {
     pub fn written(&self) -> usize {
-        self.written
+        self.inner.get().passed()
     }
 
-    /// Remaining is `self.substrate().len()`
-    /// It is decreased upon `self.advance()`
-    #[inline]
-    pub fn remaining(&self) -> usize {
-        // NOTE: we deliberately do not implement this as a call to `self.substrate().len()`
-        // to allow `self.substrate()` to be unchecked.
-
-        // TODO: here underflow is possible, meaning either
-        // (1) buffer does not have enough space to handle the advance (happens with `INIT == true`)
-        // (2) usize will overflow upon advance
-        //        (1)                 (2)
-        self.end() - self.buf.data_end - self.written
+    pub fn peek(&self) -> &[U] {
+        self.inner.get().get_ref()
     }
 
-    /// On failure, returns the overflow
-    /// i.e. by how many bytes the capacity should increase
-    /// for the advancement to be possible
-    // TODO: consider propagating overflow of usize (which is underflow in capacity)
-    // TODO: consider if unsafe advance_unchecked is even possible in a sane manner
-    pub fn advance(&mut self, by: usize) -> Result<(), usize> {
-        if by > self.remaining() {
-            Err(self.remaining() - by)
-        } else {
-            // Safety: this will never overflow, guarded by capacity check above
-            unsafe { self.written = self.written.unchecked_add(by) }
+    pub fn with_roll<F, Out>(&mut self, f: F) -> Out
+    where
+        F: for<'b> FnOnce(&'b mut BorrowedRoll<U>) -> Out,
+        Out: 'static,
+        F: 'static,
+    {
+        self.inner.with_mut_return(f)
+    }
+
+    /// Performs a transactional operation
+    /// Accepts a function F(memory) -> Result<bytes_written>
+    ///
+    // TODO: express the following as a newtype
+    /// If you're working with uninitialized bytes, remember to never de-initialize bytes
+    /// while this function will allow you to write something like
+    /// ```
+    /// memory[arbitrary_index] = byte::uninit()
+    /// ```
+    /// doing so is invalid and will make .confirm() instant UB
+    pub fn act<F, E>(&mut self, f: F) -> Result<(), E>
+    where
+        F: FnOnce(&mut [U]) -> Result<usize, E>,
+        F: 'static,
+        E: From<RollError> + 'static,
+    {
+        self.with_roll(|roll| {
+            let ret = f(roll.get_mut())?;
+            roll.advance(ret)?;
             Ok(())
-        }
+        })
     }
 
-    // The final signatures of the following functions vary on `const INIT`
-
-    fn substrate_impl(&mut self) -> &mut [byte] {
-        // Safety: overflow here is impossible per invariant of `self.written`
-        unsafe {
-            let start = self.buf.data_end.unchecked_add(self.written);
-            let end = self.end();
-
-            // TODO: although i have an idea why this range is always valid here,
-            // it is difficult to reason about, since we allow buf.init_end < buf.data_end
-            // is it sane to specify INIT == true implies buf.init_end >= buf.data_end???
-
-            // TODO: do we lose perf here due to not using RangeFrom in the INIT == false case?
-            self.buf.inner.get_unchecked_mut(start..end)
-        }
-    }
-
-    // Safety: see (INIT == false)
-    pub unsafe fn confirm_impl(self) -> usize {
-        // Safety: this will never overflow by invariant of `written`
-        unsafe { self.buf.data_end = self.buf.data_end.unchecked_add(self.written) };
-
-        // Note: self.buf.init_end is not clamped here. This is intentional.
-
-        self.written
+    unsafe fn confirm_impl(self) -> usize {
+        let added = self.inner.get().passed();
+        let buf = self.inner.into_backing_cart();
+        // TODO: this can overflow usize, but not buf.len()
+        buf.data_end += added;
+        added
     }
 }
 
-// On INIT == false, do not provide any additional guarantees
-impl<'a, T: Memory> BufTx<'a, T, false> {
-    /// Safety: while handling memory returned from here,
-    /// you should never de-initialize bytes.
-    ///
-    /// The function itself is safe, but buffer layout
-    /// requires [init | uninit] as continuous slices,
-    /// so de-initializing arbitrary bytes makes `confirm` instant UB.
-    pub fn substrate(&mut self) -> &mut [byte] {
-        self.substrate_impl()
-    }
-
-    // Saefty: notes from `self.substrate()` apply
-    pub fn as_ptr(&mut self) -> *mut [byte] {
-        self.substrate() as _
-    }
-
-    /// This function confirms the transaction,
-    /// returning the total amount of new bytes added to buffer
-    ///
+impl<'a, T: Memory> WriteTx<'a, T, byte> {
     /// Safety: by confirming, you guarantee that this transaction's memory
-    /// (as returned by self.substrate()) now contains exactly `self.written()`
-    /// initialized bytes (continuous, starting from beginning)
+    /// now contains `self.written()` initialized bytes (continuous, starting from beginning)
     pub unsafe fn confirm(self) -> usize {
         unsafe { self.confirm_impl() }
     }
 }
 
-impl<'a, T: Memory> BufTx<'a, T, true> {
-    pub fn substrate(&mut self) -> &mut [u8] {
-        // TODO: safety unclear, see `substrate_impl`
-        unsafe { slice_assume_init_mut(self.substrate_impl()) }
-    }
-
+impl<'a, T: Memory> WriteTx<'a, T, u8> {
     pub fn confirm(self) -> usize {
-        // Safety: since substrate of (INIT == true) transactions
-        // is always fully initialized, this is always safe
+        // Safety: since this Tx is init (u8), confirm is always safe
+        // Worst case, on caller error, data will contain some initialized junk padding (zeroes)
         unsafe { self.confirm_impl() }
     }
 }
 
-// View
+// Reading data
 
 pub type MemoryView<T> = yoke::Yoke<&'static [u8], Buf<T>>;
 
-impl<T: Memory> Buf<T> {
-    pub fn data(self) -> MemoryView<T> {
-        let filled = self.data_end;
+// impl<T: Memory> Buf<T> {
+//     pub fn view_data(self) -> MemoryView<T> {
+//         let data_end = self.data_end;
 
-        yoke::Yoke::attach_to_cart(self, |buf: &[byte]| {
-            // Safety: self.filled will never overflow buf.len
-            let slice = unsafe { buf.get_unchecked(..filled) };
-
-            // Safety: [filled] is a subset of [init]
-            unsafe { slice_assume_init(slice) }
-        })
-    }
-}
+//         yoke::Yoke::attach_to_cart(self, |mem: &[byte]| {
+//             Buf {
+//                 inner: mem,
+//                 data_end,
+//                 init_end,
+//             }
+//             .data()
+//         })
+//     }
+// }
 
 // TODO: the usize rets are redundant, we store that info in the buffer
 // counterargument: EOF detection
@@ -289,6 +329,23 @@ mod frame {
         flow: F,
         size: usize,
         buf: Vec<u8>, // TODO: alloc
+    }
+}
+
+#[cfg(feature = "bytes")]
+mod bytes {
+    use ::bytes::{Buf, BufMut, buf::UninitSlice};
+
+    use super::*;
+
+    unsafe impl<T: DerefMut> BufMut for Roll<T> {
+        unsafe fn advance_mut(&mut self, cnt: usize) {
+            self.advance(cnt).unwrap();
+        }
+
+        fn remaining_mut(&self) -> usize {
+            self.remaining()
+        }
     }
 }
 
@@ -315,4 +372,16 @@ pub mod tokio {
             Ok(ret)
         }
     }
+
+    // impl<T: tokio::io::AsyncWrite + Unpin> FlowTx for Adapt<T> {
+    //     async fn send<M: Memory>(&mut self, buf: &mut Buf<M>) -> Result<usize, Self::Error> {
+    //         let mut buf = buf.open_tx();
+    //         let mut buf = TokioBuf::uninit(buf.substrate());
+
+    //         use tokio::io::AsyncWriteExt;
+    //         let ret = self.0.write_buf(&mut buf).await?;
+
+    //         Ok(ret)
+    //     }
+    // }
 }

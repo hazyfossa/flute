@@ -115,3 +115,23 @@ pub mod state {
         v_impl!(A B C D E F G H I);
     }
 }
+
+pub mod branches {
+    #[inline(always)]
+    #[cold]
+    fn mark_uncommon_case() {}
+
+    pub fn likely(b: bool) -> bool {
+        if !b {
+            mark_uncommon_case();
+        }
+        b
+    }
+
+    pub fn unlikely(b: bool) -> bool {
+        if b {
+            mark_uncommon_case();
+        }
+        b
+    }
+}
