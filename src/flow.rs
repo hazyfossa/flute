@@ -28,7 +28,7 @@ type byte = std::mem::MaybeUninit<u8>;
 // which is is a non-trivial footgun. This means that either:
 // 1. Buf cannot implement Memory (current) -> does this even matter?
 // 2. Buf cannot safely slice_assume_init on Memory -> we need separate Memory / MemoryMut
-trait_alias!(pub trait Memory: Deref<Target = [byte]> + DerefMut + StableDeref + 'static);
+trait_alias!(pub trait Memory: Deref<Target = [byte]> + DerefMut + StableDeref);
 
 pub fn alloc_heap(size: usize) -> Box<[byte]> {
     Box::new_uninit_slice(size)
@@ -143,7 +143,11 @@ where
 /// [   data   |              substrate            ]
 /// [        init                 |     uninit     ]
 pub struct Buf<T> {
+    // TODO: consider not transferring ownership here
+    // turning Buf into BorrowedBuf
+    // and T into 'a
     inner: T,
+
     data_end: usize,
 
     // invariant: if init_end >= data_end,
@@ -193,7 +197,16 @@ impl<T: Memory> Buf<T> {
         unsafe { slice_assume_init_mut(data_section) }
     }
 
-    pub fn open_rx(&self) -> Roll<&[u8]> {
+    pub fn tx_capacity(&self) -> usize {
+        self.inner.len() - self.data_end
+    }
+
+    pub fn tx_init_capacity(&self) -> usize {
+        self.init_end.saturating_sub(self.data_end)
+    }
+
+    // TODO: Rx feels even more wrong than Tx here
+    pub fn open_rx(&self) -> ReadTx<&[u8]> {
         Roll::new(self.data())
     }
 
@@ -205,23 +218,24 @@ impl<T: Memory> Buf<T> {
     }
 
     pub fn open_tx_partial_init(&mut self, len: usize) -> WriteTx<'_, u8> {
-        let excess_init = self.init_end.saturating_sub(self.data_end);
+        let excess_init = self.tx_init_capacity();
 
         if excess_init == 0 {
-            // clamp in case the subtraction saturated
-            // so init_end is >= self.data_end
+            // clamp in case init_end < data_end
             self.init_end = self.data_end
         }
 
-        let (write_start, write_len) = (self.init_end + excess_init, len - excess_init);
+        if excess_init < len {
+            let (write_start, write_len) = (self.init_end + excess_init, len - excess_init);
 
-        unsafe {
-            let _ = &mut self.inner[write_start..write_start + write_len]
-                .as_mut_ptr()
-                .write_bytes(0, len);
-        };
+            unsafe {
+                let _ = &mut self.inner[write_start..write_start + write_len]
+                    .as_mut_ptr()
+                    .write_bytes(0, len);
+            };
 
-        self.init_end += write_len;
+            self.init_end += write_len;
+        }
 
         let init_section = &mut self.inner[self.data_end..self.init_end];
 
@@ -245,6 +259,9 @@ impl<T: Extend<byte>> Extend<byte> for Buf<T> {
 }
 
 // TODO: Tx is confusing here: in flute it means Transmitter, here Transaction
+#[allow(type_alias_bounds)]
+pub type ReadTx<T: Deref<Target = [u8]>> = Roll<T>;
+
 pub struct WriteTx<'a, T> {
     inner: Roll<&'a mut [T]>,
     buf_data_end: DelayedMut<'a, usize>,
@@ -343,7 +360,7 @@ impl<T: Memory> Buf<T> {
         yoke::Yoke::attach_to_cart(self, |mem: &[byte]| {
             let data_section = &mem[..data_end];
 
-            // Safety: this cas is safe by invariant of Buf
+            // Safety: this cast is safe by invariant of Buf
             // ([data] is a subset of [init])
             unsafe { slice_assume_init(data_section) }
         })
@@ -351,18 +368,75 @@ impl<T: Memory> Buf<T> {
 }
 
 pub trait FlowRx: ErrorProvider {
-    async fn recv<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<usize, Self::Error>;
+    async fn recv<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<(), Self::Error>;
 }
 
 pub trait FlowTx: ErrorProvider {
-    async fn send<T: Memory>(&mut self, buf: &mut Buf<T>) -> Result<usize, Self::Error>;
+    async fn send<T: Deref<Target = [u8]>>(
+        &mut self,
+        data: &mut Roll<T>,
+    ) -> Result<(), Self::Error>;
 }
 
-mod frame {
-    pub struct EvenChunks<F> {
+// TODO: M is unconstrained
+// impl<M, T> crate::Tx for T
+// where
+//     M: Deref<Target = [u8]>,
+//     T: FlowTx<M>,
+// {
+//     type In = M;
+
+//     async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
+//         let mut roll = Roll::new(data);
+
+//         while roll.remaining() > 0 {
+//             self.send(&mut roll);
+//         }
+
+//         Ok(())
+//     }
+// }
+
+pub mod frame {
+    use std::marker::PhantomData;
+
+    use crate::{
+        error::ErrorProvider,
+        flow::{Buf, FlowRx, MemoryView, alloc_heap, byte},
+    };
+
+    pub struct Unframed<F, M> {
         flow: F,
-        size: usize,
-        buf: Vec<u8>, // TODO: alloc
+        upper_bound: usize,
+        _memory: PhantomData<M>,
+    }
+
+    impl<F, M> Unframed<F, M> {
+        pub fn new(flow: F, upper_bound: usize) -> Self {
+            Self {
+                flow,
+                upper_bound,
+                _memory: PhantomData,
+            }
+        }
+    }
+
+    impl<F: FlowRx, M> ErrorProvider for Unframed<F, M> {
+        type Error = F::Error;
+    }
+
+    type Heap = Box<[byte]>;
+
+    impl<F: FlowRx> crate::Rx for Unframed<F, Heap> {
+        type Out = MemoryView<Heap>;
+
+        async fn recv(&mut self) -> Result<Self::Out, crate::ChannelError> {
+            let mem = alloc_heap(self.upper_bound);
+            let mut buf = Buf::new(mem);
+
+            self.flow.recv(&mut buf).await?;
+            Ok(buf.view_data())
+        }
     }
 }
 
@@ -405,8 +479,13 @@ mod bytes {
 
 #[cfg(feature = "tokio")]
 pub mod tokio {
+    use std::ops::Deref;
+
     use super::{Buf, FlowRx, Memory};
-    use crate::{error::ErrorProvider, flow::FlowTx};
+    use crate::{
+        error::ErrorProvider,
+        flow::{FlowTx, ReadTx},
+    };
 
     pub struct Adapt<T>(T);
 
@@ -415,7 +494,7 @@ pub mod tokio {
     }
 
     impl<T: tokio::io::AsyncRead + Unpin> FlowRx for Adapt<T> {
-        async fn recv<M: Memory>(&mut self, buf: &mut Buf<M>) -> Result<usize, Self::Error> {
+        async fn recv<M: Memory>(&mut self, buf: &mut Buf<M>) -> Result<(), Self::Error> {
             let mut tx = buf.open_tx();
 
             use tokio::io::AsyncReadExt;
@@ -423,16 +502,21 @@ pub mod tokio {
 
             // Safety: tokio's guarantees about buffer layout align with ours
             // For more info, see bytes::BufMut::advance (which is unsafe)
-            Ok(unsafe { tx.confirm() })
+            let _ = unsafe { tx.confirm() };
+
+            Ok(())
         }
     }
 
     impl<T: tokio::io::AsyncWrite + Unpin> FlowTx for Adapt<T> {
-        async fn send<M: Memory>(&mut self, buf: &mut Buf<M>) -> Result<usize, Self::Error> {
+        async fn send<M: Deref<Target = [u8]>>(
+            &mut self,
+            data: &mut ReadTx<M>,
+        ) -> Result<(), Self::Error> {
             use tokio::io::AsyncWriteExt;
-            let ret = self.0.write_buf(&mut buf.open_rx()).await?;
+            self.0.write_buf(data).await?;
 
-            Ok(ret)
+            Ok(())
         }
     }
 }

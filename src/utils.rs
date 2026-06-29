@@ -121,12 +121,12 @@ pub mod branches {
     #[cold]
     fn mark_uncommon_case() {}
 
-    pub fn likely(b: bool) -> bool {
-        if !b {
-            mark_uncommon_case();
-        }
-        b
-    }
+    // pub fn likely(b: bool) -> bool {
+    //     if !b {
+    //         mark_uncommon_case();
+    //     }
+    //     b
+    // }
 
     pub fn unlikely(b: bool) -> bool {
         if b {
