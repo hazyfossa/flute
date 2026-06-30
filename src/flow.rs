@@ -407,14 +407,16 @@ pub mod frame {
 
     pub struct Unframed<F, M> {
         flow: F,
+        lower_bound: usize,
         upper_bound: usize,
         _memory: PhantomData<M>,
     }
 
     impl<F, M> Unframed<F, M> {
-        pub fn new(flow: F, upper_bound: usize) -> Self {
+        pub fn new(flow: F, upper_bound: usize, lower_bound: Option<usize>) -> Self {
             Self {
                 flow,
+                lower_bound: lower_bound.unwrap_or(0),
                 upper_bound,
                 _memory: PhantomData,
             }
@@ -434,7 +436,13 @@ pub mod frame {
             let mem = alloc_heap(self.upper_bound);
             let mut buf = Buf::new(mem);
 
-            self.flow.recv(&mut buf).await?;
+            // while Tx.written() < ... would be more appropriate here
+            // but then we need WriteTx as parameter of FlowRx
+            // and the trait becomes generic over byte/u8
+            while buf.data().len() < self.lower_bound {
+                self.flow.recv(&mut buf).await?;
+            }
+
             Ok(buf.view_data())
         }
     }
