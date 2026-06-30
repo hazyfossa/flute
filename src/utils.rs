@@ -22,6 +22,22 @@ mod macros {
                 {}
             };
     }
+
+    #[macro_export(local_inner_macros)]
+    macro_rules! vary {
+        ($v_impl:tt) => {
+            $v_impl!(T1);
+            $v_impl!(T1 T2);
+            $v_impl!(T1 T2 T3);
+            $v_impl!(T1 T2 T3 T4);
+            $v_impl!(T1 T2 T3 T4 T5);
+            $v_impl!(T1 T2 T3 T4 T5 T6);
+            $v_impl!(T1 T2 T3 T4 T5 T6 T7);
+            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8);
+            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8 T9);
+            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8 T9 T10);
+        };
+    }
 }
 
 pub mod error {
@@ -56,27 +72,16 @@ pub mod error {
         }
     }
 
-    mod variadics {
-        use super::*;
-        macro_rules! v_impl {
-            ($($t:ident)*) => {
-                impl<$($t,)*> ErrorProvider for ( $($t,)* ) {
-                    type Error = eyre::Error;
-                    fn name() -> Option<&'static str> { None }
-                }
-            };
-        }
-
-        v_impl!(A);
-        v_impl!(A B);
-        v_impl!(A B C);
-        v_impl!(A B C D);
-        v_impl!(A B C D E);
-        v_impl!(A B C D E F);
-        v_impl!(A B C D E F G);
-        v_impl!(A B C D E F G H);
-        v_impl!(A B C D E F G H I);
+    macro_rules! v_impl {
+        ($($t:ident)*) => {
+            impl<$($t,)*> ErrorProvider for ( $($t,)* ) {
+                type Error = eyre::Error;
+                fn name() -> Option<&'static str> { None }
+            }
+        };
     }
+
+    crate::vary!(v_impl);
 }
 
 pub mod state {
@@ -91,29 +96,18 @@ pub mod state {
         }
     }
 
-    mod variadics {
-        use super::*;
-        macro_rules! v_impl {
-            ($($t:ident)*) => {
-                impl<$($t,)*> Stateless for ( $($t,)* )
-                where $($t: Stateless,)* {
-                    fn stateless() -> Self {
-                        ($($t::stateless(),)*)
-                    }
+    macro_rules! v_impl {
+        ($($t:ident)*) => {
+            impl<$($t,)*> Stateless for ( $($t,)* )
+            where $($t: Stateless,)* {
+                fn stateless() -> Self {
+                    ($($t::stateless(),)*)
                 }
-            };
-        }
-
-        v_impl!(A);
-        v_impl!(A B);
-        v_impl!(A B C);
-        v_impl!(A B C D);
-        v_impl!(A B C D E);
-        v_impl!(A B C D E F);
-        v_impl!(A B C D E F G);
-        v_impl!(A B C D E F G H);
-        v_impl!(A B C D E F G H I);
+            }
+        };
     }
+
+    crate::vary!(v_impl);
 }
 
 pub mod branches {
