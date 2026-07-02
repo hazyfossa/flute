@@ -289,30 +289,6 @@ impl<'a, T> WriteTx<'a, T> {
         }
     }
 
-    pub fn as_roll(&mut self) -> &mut Roll<&'a mut [T]> {
-        &mut self.inner
-    }
-
-    /// Performs a transactional operation
-    /// Accepts a function F(memory) -> Result<bytes_written>
-    ///
-    // TODO: express the following as a newtype
-    /// If you're working with uninitialized bytes, remember to never de-initialize bytes
-    /// while this function will allow you to write something like
-    /// ```
-    /// memory[arbitrary_index] = byte::uninit()
-    /// ```
-    /// doing so is invalid and will make .confirm() instant UB
-    pub fn act<F, E>(&mut self, f: F) -> Result<(), E>
-    where
-        F: FnOnce(&mut [T]) -> Result<usize, E>,
-        E: From<RollError> + 'static,
-    {
-        let ret = f(self.get_mut())?;
-        self.advance(ret)?;
-        Ok(())
-    }
-
     /// Safety: by confirming, you guarantee that this transaction's memory
     /// now contains `self.written()` initialized bytes (continuous, starting from beginning)
     unsafe fn confirm_impl(self) -> usize {
@@ -378,31 +354,12 @@ pub trait FlowTx: ErrorProvider {
     ) -> Result<(), Self::Error>;
 }
 
-// TODO: M is unconstrained
-// impl<M, T> crate::Tx for T
-// where
-//     M: Deref<Target = [u8]>,
-//     T: FlowTx<M>,
-// {
-//     type In = M;
-
-//     async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
-//         let mut roll = Roll::new(data);
-
-//         while roll.remaining() > 0 {
-//             self.send(&mut roll);
-//         }
-
-//         Ok(())
-//     }
-// }
-
-pub mod frame {
-    use std::marker::PhantomData;
+pub mod unframed {
+    use std::{marker::PhantomData, ops::Deref};
 
     use crate::{
         error::ErrorProvider,
-        flow::{Buf, FlowRx, MemoryView, alloc_heap, byte},
+        flow::{Buf, FlowRx, FlowTx, MemoryView, Roll, alloc_heap, byte},
     };
 
     pub struct Unframed<F, M> {
@@ -413,13 +370,21 @@ pub mod frame {
     }
 
     impl<F, M> Unframed<F, M> {
-        pub fn new(flow: F, upper_bound: usize, lower_bound: Option<usize>) -> Self {
+        pub fn new(flow: F, lower_bound: usize, upper_bound: usize) -> Self {
             Self {
                 flow,
-                lower_bound: lower_bound.unwrap_or(0),
+                lower_bound,
                 upper_bound,
                 _memory: PhantomData,
             }
+        }
+
+        pub fn exact(flow: F, len: usize) -> Self {
+            Self::new(flow, len, len)
+        }
+
+        pub fn up_to(flow: F, len: usize) -> Self {
+            Self::new(flow, 0, len)
         }
     }
 
@@ -444,6 +409,28 @@ pub mod frame {
             }
 
             Ok(buf.view_data())
+        }
+    }
+
+    async fn send_all<F: FlowTx>(flow: &mut F, data: &[u8]) -> Result<(), F::Error> {
+        let mut roll = Roll::new(data);
+
+        while roll.remaining() > 0 {
+            flow.send(&mut roll).await?;
+        }
+
+        Ok(())
+    }
+
+    impl<F, M> crate::Tx for Unframed<F, M>
+    where
+        F: FlowTx,
+        M: Deref<Target = [u8]>,
+    {
+        type In = M;
+
+        async fn send(&mut self, data: Self::In) -> Result<(), crate::ChannelError> {
+            Ok(send_all(&mut self.flow, &data).await?)
         }
     }
 }
@@ -487,7 +474,7 @@ mod bytes {
 
 #[cfg(feature = "tokio")]
 pub mod tokio {
-    use std::ops::Deref;
+    use std::ops::{Deref, DerefMut};
 
     use super::{Buf, FlowRx, Memory};
     use crate::{
@@ -506,7 +493,7 @@ pub mod tokio {
             let mut tx = buf.open_tx();
 
             use tokio::io::AsyncReadExt;
-            self.0.read_buf(tx.as_roll()).await?;
+            self.0.read_buf(tx.deref_mut()).await?;
 
             // Safety: tokio's guarantees about buffer layout align with ours
             // For more info, see bytes::BufMut::advance (which is unsafe)
