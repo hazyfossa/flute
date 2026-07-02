@@ -17,6 +17,8 @@ pub trait Service {
     type Client<C: Caller<Self>>: From<C>;
 }
 
+// Caller
+
 pub trait Caller<S: Service>: ErrorProvider {
     async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error>;
 }
@@ -55,6 +57,16 @@ where
     }
 }
 
+pub fn open_channel<S, C>(channel: C) -> S::Client<OrderedCaller<C>>
+where
+    S: Service,
+    C: Channel<In = S::Request, Out = S::Response>,
+{
+    S::Client::from(OrderedCaller(channel))
+}
+
+// Error handling
+
 // TODO: this hatch is naive.
 // With color-eyre, it will send color codes over the wire.
 // With snafu, snafu::Report is not applied.
@@ -91,8 +103,9 @@ pub enum ClientError {
     },
 }
 
+// Codegen
+
 pub trait Handler<S: Service + ?Sized> {
-    // TODO: consider Handler: ErrorProvider
     async fn handle(&self, request: S::Request) -> S::Response;
 }
 
@@ -127,6 +140,7 @@ macro_rules! define_rpc {
             $($function($response)),*
         }
 
+
         pub struct Service;
         impl rpc::Service for Service {
             type Request = Request;
@@ -160,16 +174,6 @@ macro_rules! define_rpc {
         {
             fn from(caller: C) -> Self {
                 Self(caller)
-            }
-        }
-
-        // TODO: this looks like unnecessary codegen
-        // since we have associated From
-        impl<Ch> Client<OrderedCaller<Ch>>
-        where Ch: $crate::Channel<In = Request, Out = Response>
-        {
-            pub fn with_channel(channel: Ch) -> Self {
-                Self::from(OrderedCaller(channel))
             }
         }
 
@@ -209,9 +213,20 @@ macro_rules! define_rpc {
                 }
             }
         }
+        use_eyre => {
+            impl Into<Result<Self, ::eyre::Error>> for Response {
+                fn into(self) -> Result<Self, ::eyre::Error> {
+                    match self {
+                        $(Self::$function(value) => match value {
+                            Ok(v) => ::eyre::Ok(v),
+                            Err(v) => ::eyre::Err(v),
+                            not_result => Ok(not_result),
+                        }),*
+                    }
+                }
+            }
+        }
         );
-
-
     }};
 
     // TODO: While this is fun, seriously consider switching to proc-macros
@@ -219,8 +234,8 @@ macro_rules! define_rpc {
         $crate::define_rpc!(@scope ($s:tt) => {
             macro_rules! selector {
                 $(
-                    ($feature, $s(other:tt)*) => { $($body)* }
-                )+;
+                    ($feature, $s(other:tt)*) => { $($body)* };
+                )+
                 ($not_feature:tt, $s($other:tt)*) => { selector!($s($other)*); };
                 () => {}
             }

@@ -96,41 +96,46 @@ pub mod kanal {
     }
 }
 
-// #[cfg(feature = "tower")]
-// mod tower {
-//     use std::{
-//         marker::PhantomData,
-//         pin::Pin,
-//         task::{Context, Poll},
-//     };
+#[cfg(feature = "tower")]
+pub mod tower {
+    use std::{
+        marker::PhantomData,
+        pin::Pin,
+        task::{Context, Poll},
+    };
 
-//     pub struct Adapt<T, S>(T, PhantomData<S>);
-//     pub fn adapt<T, S>(handler: T) -> Adapt<T, S>
-//     where
-//         S: crate::rpc::Service,
-//         T: crate::rpc::Handler<S>,
-//     {
-//         Adapt(handler, PhantomData)
-//     }
+    use crate::error::AsResult;
 
-//     impl<T, S> tower_service::Service<S::Request> for Adapt<T, S>
-//     where
-//         S: crate::rpc::Service,
-//         T: crate::rpc::Handler<S>,
-//     {
-//         type Future = Pin<Box<dyn Future<Output = eyre::Result<S::Response>>>>;
-//         type Response = S::Response;
-//         type Error = eyre::Error;
+    pub struct Adapt<T, S>(T, PhantomData<S>);
+    pub fn adapt<T, S>(handler: T) -> Adapt<T, S>
+    where
+        S: crate::rpc::Service,
+        T: crate::rpc::Handler<S>,
+    {
+        Adapt(handler, PhantomData)
+    }
 
-//         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//             Poll::Ready(Ok(()))
-//         }
+    impl<T, S> tower_service::Service<S::Request> for Adapt<T, S>
+    where
+        S: crate::rpc::Service,
+        S::Request: 'static,
+        S::Response: AsResult,
+        T: crate::rpc::Handler<S> + Clone + 'static,
+    {
+        type Future = Pin<Box<dyn Future<Output = Result<S::Response, Self::Error>>>>;
+        type Response = S::Response;
+        type Error = eyre::Error;
 
-//         fn call(&mut self, req: S::Request) -> impl Future<Output = eyre::Result<S::Response>> {
-//             self.0.handle(req)
-//         }
-//     }
-// }
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn call(&mut self, req: S::Request) -> Self::Future {
+            let handler = self.0.clone();
+            Box::pin(async move { handler.handle(req).await.into() })
+        }
+    }
+}
 
 #[cfg(feature = "wasm")]
 pub mod wasm {

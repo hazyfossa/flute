@@ -43,6 +43,8 @@ mod macros {
 pub mod error {
     use std::any::type_name;
 
+    use crate::trait_alias;
+
     pub trait ErrorProvider {
         type Error: Into<eyre::Error>;
 
@@ -82,6 +84,8 @@ pub mod error {
     }
 
     crate::vary!(v_impl);
+
+    trait_alias!(pub trait AsResult: Into<Result<Self, eyre::Error>>);
 }
 
 pub mod state {
