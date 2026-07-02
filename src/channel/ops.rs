@@ -8,7 +8,14 @@ pub mod split {
     pub trait Split: Sized + Channel {
         type Tx: Tx<In = Self::In>;
         type Rx: Rx<Out = Self::Out>;
+
         fn split(self) -> (Self::Tx, Self::Rx);
+
+        // TODO: consider separate trait
+        #[allow(unused_variables)]
+        fn reunite(tx: Self::Tx, rx: Self::Rx) -> Option<Self> {
+            None
+        }
     }
 
     impl<A, B> Split for super::merge::Merged<A, B>

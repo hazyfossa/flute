@@ -54,6 +54,10 @@ pub mod futures {
             let (tx, rx) = self.inner.split();
             (adapt(tx), adapt(rx))
         }
+
+        fn reunite(tx: Self::Tx, rx: Self::Rx) -> Option<Self> {
+            tx.inner.reunite(rx.inner).ok().map(adapt)
+        }
     }
 }
 
