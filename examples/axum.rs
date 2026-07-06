@@ -21,7 +21,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use axum::{Json, Router, extract, routing::get};
+use axum::{Json, Router, extract, http::StatusCode, response::IntoResponse, routing::get};
 
 // The following is a generic example of a flute service
 
@@ -54,14 +54,18 @@ impl KV::Handler for WebHashMap {
 async fn api(
     service: extract::State<WebHashMap>,
     request: extract::Json<KV::Request>,
-) -> Json<KV::Response> {
-    // connect the handler functions as service routes
-    let service = KV::Route(service.0);
+) -> axum::response::Response {
+    // create a direct caller for the service
+    use flute::rpc::Caller;
+    let mut service = KV::Route(service.0);
 
-    // use the handler manually
-    use flute::rpc::Handler;
+    // use the caller
 
-    service.handle(request.0).await.into()
+    match service.call(request.0).await {
+        Ok(response) => Json::from(response).into_response(),
+        // the following error means the caller itself failed, not the service
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, "Something went wrong").into_response(),
+    }
 }
 
 #[tokio::main]

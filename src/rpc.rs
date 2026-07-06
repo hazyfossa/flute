@@ -17,27 +17,6 @@ pub trait Service {
     type Client<C: Caller<Self>>: From<C>;
 }
 
-// Direct caller
-pub struct DirectCaller<T>(T);
-
-impl<T> ErrorProvider for DirectCaller<T> {
-    type Error = std::convert::Infallible;
-}
-
-// TODO: crazy idea, unify Caller and Handler
-impl<T, S> Caller<S> for DirectCaller<T>
-where
-    S: Service,
-    T: Handler<S>,
-{
-    async fn call(
-        &mut self,
-        request: <S as Service>::Request,
-    ) -> Result<<S as Service>::Response, Self::Error> {
-        Ok(self.0.handle(request).await)
-    }
-}
-
 // Ordered channel caller
 
 pub trait Caller<S: Service>: ErrorProvider {
@@ -126,10 +105,6 @@ pub enum ClientError {
 
 // Codegen
 
-pub trait Handler<S: Service + ?Sized> {
-    async fn handle(&self, request: S::Request) -> S::Response;
-}
-
 #[macro_export]
 macro_rules! define_rpc {
     (
@@ -177,14 +152,18 @@ macro_rules! define_rpc {
             }
         }
 
-        impl<T: Handler> rpc::Handler<Service> for Route<T> {
-            async fn handle(&self, request: Request) -> Response {
-                match request {
+        impl<T> flute::error::ErrorProvider for Route<T> {
+            type Error = std::convert::Infallible;
+        }
+
+        impl<T: Handler> rpc::Caller<Service> for Route<T> {
+            async fn call(&mut self, request: Request) -> Result<Response, Self::Error> {
+                Ok(match request {
                     $(Request::$function { $($field),* } => {
                         let ret = self.0.$function($($field),*).await;
                         Response::$function(ret)
                     }),*
-                }
+                })
             }
         }
 

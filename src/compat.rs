@@ -114,7 +114,7 @@ pub mod tower {
     pub fn adapt<T, S>(handler: T) -> Adapt<T, S>
     where
         S: crate::rpc::Service,
-        T: crate::rpc::Handler<S>,
+        T: crate::rpc::Caller<S>,
     {
         Adapt(handler, PhantomData)
     }
@@ -124,7 +124,8 @@ pub mod tower {
         S: crate::rpc::Service,
         S::Request: 'static,
         S::Response: AsResult,
-        T: crate::rpc::Handler<S> + Clone + 'static,
+        T: crate::rpc::Caller<S> + Clone + 'static,
+        T::Error: Into<eyre::Error>,
     {
         type Future = Pin<Box<dyn Future<Output = Result<S::Response, Self::Error>>>>;
         type Response = S::Response;
@@ -135,8 +136,8 @@ pub mod tower {
         }
 
         fn call(&mut self, req: S::Request) -> Self::Future {
-            let handler = self.0.clone();
-            Box::pin(async move { handler.handle(req).await.into() })
+            let mut handler = self.0.clone();
+            Box::pin(async move { handler.call(req).await.map_err(|e| e.into()).into() })
         }
     }
 }

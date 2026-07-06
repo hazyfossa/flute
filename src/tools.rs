@@ -2,14 +2,14 @@ pub mod server {
 
     use crate::{
         Channel, ChannelError,
-        rpc::{Handler, Service},
+        rpc::{Caller, Service},
     };
 
-    #[cfg(feature = "fast-server")]
-    use crate::{Rx, Tx, ops::split::Split};
+    // #[cfg(feature = "fast-server")]
+    // use crate::{Rx, Tx, ops::split::Split};
 
     pub async fn serve<S: Service>(
-        handler: impl Handler<S>,
+        mut handler: impl Caller<S>,
         mut channel: impl Channel<In = S::Response, Out = S::Request>,
     ) -> Result<(), crate::ChannelError> {
         loop {
@@ -19,80 +19,84 @@ pub mod server {
                 Err(e) => return Err(e),
             };
 
-            let response = handler.handle(request).await;
+            let response = handler.call(request).await?;
             channel.send(response).await?;
         }
     }
 
-    #[cfg(feature = "fast-server")]
-    pub async fn serve_fast<S: Service, H, C>(
-        handler: H,
-        channel: C,
-        max_concurrent: usize,
-    ) -> Result<(), crate::ChannelError>
-    where
-        C: Channel<In = S::Response, Out = S::Request> + Split,
-        C::Tx: Clone + 'static,
-        H: Handler<S> + 'static,
-        S::Request: 'static,
-        S::Response: 'static,
-    {
-        use std::sync::Arc;
-        use tokio::task::JoinSet;
+    // TODO: defer: blocked on flux
+    // #[cfg(feature = "fast-server")]
+    // pub async fn serve_fast<S: Service, H, C>(
+    //     handler: H,
+    //     channel: C,
+    //     max_concurrent: usize,
+    // ) -> Result<(), crate::ChannelError>
+    // where
+    //     C: Channel<In = S::Response, Out = S::Request> + Split,
+    //     C::Tx: Clone + 'static,
+    //     H: Caller<S> + 'static,
+    //     S::Request: 'static,
+    //     S::Response: 'static,
+    // {
+    //     use std::sync::Arc;
+    //     use tokio::task::JoinSet;
 
-        let handler = Arc::new(handler);
-        let (tx, mut rx) = channel.split();
-        let mut tasks = JoinSet::new();
+    //     let handler = Arc::new(handler);
+    //     let (tx, mut rx) = channel.split();
+    //     let mut tasks = JoinSet::new();
 
-        fn handle_task_result(
-            res: Result<Result<(), crate::ChannelError>, tokio::task::JoinError>,
-        ) -> Result<(), crate::ChannelError> {
-            match res {
-                Ok(Ok(())) => Ok(()),
-                Ok(Err(e)) => Err(e),
-                Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
-            }
-        }
+    //     fn handle_task_result(
+    //         res: Result<Result<(), crate::ChannelError>, tokio::task::JoinError>,
+    //     ) -> Result<(), crate::ChannelError> {
+    //         match res {
+    //             Ok(Ok(())) => Ok(()),
+    //             Ok(Err(e)) => Err(e),
+    //             Err(join_err) => std::panic::resume_unwind(join_err.into_panic()),
+    //         }
+    //     }
 
-        let task = |request| {
-            let handler = Arc::clone(&handler);
-            let mut tx = tx.clone();
-            async move {
-                let response = handler.handle(request).await;
-                tx.send(response).await
-            }
-        };
+    //     // handler future should never leave thread (~!Send)
+    //     // if handler wants parallelism, this should be explicit (internal)
+    //     // this also alleviates Arc, spawn_local and other nonsense
+    //     let task = |request| {
+    //         let handler = Arc::clone(&handler);
+    //         let mut tx = tx.clone();
+    //         async move {
+    //             let response = handler.call(request).await?; // TODO: handle call failure
+    //             tx.send(response).await
+    //         }
+    //     };
 
-        loop {
-            // If over capacity, only poll existing
-            if tasks.len() >= max_concurrent {
-                if let Some(res) = tasks.join_next().await {
-                    handle_task_result(res)?;
-                }
-                continue;
-            }
+    //     loop {
+    //         // If over capacity, only poll existing
+    //         if tasks.len() >= max_concurrent {
+    //             if let Some(res) = tasks.join_next().await {
+    //                 handle_task_result(res)?;
+    //             }
+    //             continue;
+    //         }
 
-            tokio::select! {
-                // Accept new
-                req = rx.recv() => match req {
-                    Ok(request) => { tasks.spawn_local(task(request)); },
-                    Err(crate::ChannelError::Closed) => break,
-                    Err(e) => return Err(e),
-                },
-                // Poll existing
-                task_res = tasks.join_next(), if !tasks.is_empty() => {
-                    // the unwrap is guarded by is_empty check above
-                    handle_task_result(task_res.unwrap())?;
-                }
-            }
-        }
+    //         tokio::select! {
+    //             // Accept new
+    //             req = rx.recv() => match req {
+    //                 Ok(request) => { tasks.spawn_local(task(request)); },
+    //                 Err(crate::ChannelError::Closed) => break,
+    //                 Err(e) => return Err(e),
+    //             },
+    //             // Poll existing
+    //             task_res = tasks.join_next(), if !tasks.is_empty() => {
+    //                 // the unwrap is guarded by is_empty check above
+    //                 handle_task_result(task_res.unwrap())?;
+    //             }
+    //         }
+    //     }
 
-        while let Some(res) = tasks.join_next().await {
-            handle_task_result(res)?;
-        }
+    //     while let Some(res) = tasks.join_next().await {
+    //         handle_task_result(res)?;
+    //     }
 
-        Ok(())
-    }
+    //     Ok(())
+    // }
 }
 
 #[cfg(feature = "kanal")]
