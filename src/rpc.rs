@@ -17,7 +17,28 @@ pub trait Service {
     type Client<C: Caller<Self>>: From<C>;
 }
 
-// Caller
+// Direct caller
+pub struct DirectCaller<T>(T);
+
+impl<T> ErrorProvider for DirectCaller<T> {
+    type Error = std::convert::Infallible;
+}
+
+// TODO: crazy idea, unify Caller and Handler
+impl<T, S> Caller<S> for DirectCaller<T>
+where
+    S: Service,
+    T: Handler<S>,
+{
+    async fn call(
+        &mut self,
+        request: <S as Service>::Request,
+    ) -> Result<<S as Service>::Response, Self::Error> {
+        Ok(self.0.handle(request).await)
+    }
+}
+
+// Ordered channel caller
 
 pub trait Caller<S: Service>: ErrorProvider {
     async fn call(&mut self, request: S::Request) -> Result<S::Response, Self::Error>;
