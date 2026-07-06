@@ -124,6 +124,41 @@ where
     }
 }
 
+// transfrom_alias macro
+
+// TODO: consider merging this with variadics of transform
+// Pros:
+// - infinite chains
+// - slightly less code
+// Cons:
+// - Not as elegant
+// - But *what if* one day rust properly supports variadics
+#[macro_export]
+macro_rules! transform_alias {
+    ($vis:vis $name:ident $([$($opt:tt)*])? = $($(#$modifier:tt)? $transform:path)=>+) => {
+        $vis struct $name $(<$($opt)*>)? ( ($($transform),+) );
+
+        impl $(<$($opt)*>)? $crate::state::Stateless for $crate::transform_alias!(@with_opt $name $($($opt)*)?)
+        where ($($transform),+): $crate::state::Stateless {}
+    };
+
+    (@with_opt $name:ident) => { $name };
+    (@with_opt $name:ident $($opt:tt)+) => { $crate::transform_alias!(@opt $name [] $($opt)+) };
+
+
+    /* skip */
+    (@opt $name:ident [$($acc:tt),*] const $($opt:tt)*) => {
+        $crate::transform_alias!(@opt $name [$($acc),*] $($opt)*)
+    };
+
+    /* preserve */
+    (@opt $name:ident [$($acc:tt),*] $ident:ident : $type:ty, $($opt:tt)*) => {
+        $crate::transform_alias!(@opt $name [$($acc,)* $ident] $($opt)*)
+    };
+
+    (@opt $name:ident [$($acc:tt),*]) => { $name <$($acc),*> };
+}
+
 // variadics
 use crate::utils::error::EraseResultExt;
 
@@ -231,6 +266,7 @@ macro_rules! var_impl {
 
 #[allow(non_snake_case)]
 mod variadics {
+    // TODO: vary!()
     use super::*;
     var_impl!(#[A B] {A: Transform, B: Transform<Before = A::After>});
     var_impl!(#[A B C] {A: Transform, B: Transform<Before = A::After>, C: Transform<Before = B::After>});
