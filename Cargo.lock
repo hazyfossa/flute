@@ -155,6 +155,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "gloo-net",
+ "hazymacros",
  "kanal",
  "postcard",
  "serde",
@@ -254,6 +255,10 @@ checksum = "b0c35f58762feb77d74ebe43bdbc3210f09be9fe6742234d573bacc26ed92b67"
 dependencies = [
  "byteorder",
 ]
+
+[[package]]
+name = "hazymacros"
+version = "0.1.0"
 
 [[package]]
 name = "heapless"

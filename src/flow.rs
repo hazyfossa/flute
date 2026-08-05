@@ -9,9 +9,10 @@ use yoke::Yokeable;
 
 use crate::{
     error::ErrorProvider,
-    trait_alias,
     utils::{branches::unlikely, delayed_mut::DelayedMut},
 };
+
+use hazymacros::trait_alias;
 
 /// Flute's byte, unlike rust's "u8", has 257 possible states.
 ///
@@ -28,7 +29,7 @@ type byte = std::mem::MaybeUninit<u8>;
 // which is is a non-trivial footgun. This means that either:
 // 1. Buf cannot implement Memory (current) -> does this even matter?
 // 2. Buf cannot safely slice_assume_init on Memory -> we need separate Memory / MemoryMut
-trait_alias!(pub trait Memory: Deref<Target = [byte]> + DerefMut + StableDeref);
+trait_alias!(pub Memory: Deref<Target = [byte]> + DerefMut + StableDeref);
 
 pub fn alloc_heap(size: usize) -> Box<[byte]> {
     Box::new_uninit_slice(size)

@@ -1,49 +1,7 @@
-mod macros {
-    // TODO: generic bounds on alias are broken (local ambiguity of tt*)
-    // this is fine since we do not use those in this crate
-    #[macro_export(local_inner_macros)]
-    macro_rules! trait_alias {
-        (
-            $(#[$($attr:meta)*])?
-            $vis:vis trait $name:ident $(< $($life:lifetime)? $(,)? $($generic:ident),* >)? : $($for:tt)*
-            $(where $($generic_bound:tt)+)?
-        ) => {
-                $(#[$($attr)*])?
-                $vis trait $name $(< $($life,)* $($generic,)*>)?: $($for)* {}
-                impl<
-                    $($($life,)?)?
-                    Impl,
-                    $($($generic,)*)?
-                >
-                $name $(< $($life,)? $($generic),* >)?
-                for Impl where
-                    Impl: $($for)*,
-                    $($($generic_bound)+)?
-                {}
-            };
-    }
-
-    #[macro_export(local_inner_macros)]
-    macro_rules! vary {
-        ($v_impl:tt) => {
-            $v_impl!(T1);
-            $v_impl!(T1 T2);
-            $v_impl!(T1 T2 T3);
-            $v_impl!(T1 T2 T3 T4);
-            $v_impl!(T1 T2 T3 T4 T5);
-            $v_impl!(T1 T2 T3 T4 T5 T6);
-            $v_impl!(T1 T2 T3 T4 T5 T6 T7);
-            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8);
-            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8 T9);
-            $v_impl!(T1 T2 T3 T4 T5 T6 T7 T8 T9 T10);
-        };
-    }
-}
-
 pub mod error {
     use std::any::type_name;
 
-    use crate::trait_alias;
+    use hazymacros::trait_alias;
 
     pub trait ErrorProvider {
         type Error: Into<eyre::Error>;
@@ -83,9 +41,9 @@ pub mod error {
         };
     }
 
-    crate::vary!(v_impl);
+    hazymacros::vary!(v_impl);
 
-    trait_alias!(pub trait AsResult: Into<Result<Self, eyre::Error>>);
+    trait_alias!(pub AsResult: Into<Result<Self, eyre::Error>>);
 }
 
 pub mod state {
@@ -111,7 +69,7 @@ pub mod state {
         };
     }
 
-    crate::vary!(v_impl);
+    hazymacros::vary!(v_impl);
 }
 
 pub mod branches {

@@ -29,9 +29,9 @@ where
     }
 }
 
-crate::trait_alias!(
+hazymacros::trait_alias!(
     #[doc = "A channel is a combination of a Receiver and Transmitter"]
-    pub trait Channel: Tx + Rx
+    pub Channel: Tx + Rx
 );
 
 // A wire is a channel, for which input and output are the same

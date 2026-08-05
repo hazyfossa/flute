@@ -3,11 +3,12 @@
 use std::fmt::Debug;
 
 use eyre::eyre;
+use hazymacros::trait_alias;
 use thiserror::Error;
 
-use crate::{Channel, ChannelError, error::ErrorProvider, trait_alias};
+use crate::{Channel, ChannelError, error::ErrorProvider};
 
-trait_alias!(trait Data: serde::Serialize + serde::de::DeserializeOwned);
+trait_alias!(Data: serde::Serialize + serde::de::DeserializeOwned);
 
 #[allow(private_bounds)]
 pub trait Service {
