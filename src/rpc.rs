@@ -58,11 +58,10 @@ where
     }
 }
 
-pub fn open_channel<S, C>(channel: C) -> S::Client<OrderedCaller<C>>
-where
-    S: Service,
-    C: Channel<In = S::Request, Out = S::Response>,
-{
+// TODO: consider making this an ext trait
+pub fn open_channel<S: Service>(
+    channel: impl Channel<In = S::Request, Out = S::Response>,
+) -> S::Client<OrderedCaller<impl Channel<In = S::Request, Out = S::Response>>> {
     S::Client::from(OrderedCaller(channel))
 }
 
@@ -199,7 +198,7 @@ macro_rules! define_rpc {
             })*
         }
 
-        $crate::define_rpc!(@feature_select from $(#[$feat])* :
+        $crate::_h::feature_select!([$($feat)*]
         split_handler => {
             pub mod split_handler {
                 use super::*;
@@ -229,25 +228,4 @@ macro_rules! define_rpc {
         }
         );
     }};
-
-    // TODO: While this is fun, seriously consider switching to proc-macros
-    (@feature_select from $(#[$features:tt])* : $($feature:tt => { $($body:tt)* })+) => {
-        $crate::define_rpc!(@scope ($s:tt) => {
-            macro_rules! selector {
-                $(
-                    ($feature, $s(other:tt)*) => { $($body)* };
-                )+
-                ($not_feature:tt, $s($other:tt)*) => { selector!($s($other)*); };
-                () => {}
-            }
-        });
-
-        selector!($($features,)*);
-    };
-
-    // See https://github.com/rust-lang/rust/issues/35853#issuecomment-415993963
-    (@scope $($body:tt)*) => {
-        macro_rules! __with_dollar_sign { $($body)* }
-        __with_dollar_sign!($);
-    }
 }

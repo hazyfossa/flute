@@ -12,4 +12,4 @@ pub mod tools;
 mod utils;
 pub use utils::{error, state};
 
-hazymacros::setup!();
+hazymacros::setup!(extern _h);

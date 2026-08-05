@@ -55,7 +55,7 @@ async fn main() {
     // Here we execute both sides simultaneously
     // In a real-world application, these two parts can be in two different binaries
     // both of which depend on a "service-definition" crate containing the define_rpc!
-    let mut client = flute::rpc::open_channel::<Simple::Service, _>(client_channel);
+    let mut client = flute::rpc::open_channel::<Simple::Service>(client_channel);
 
     let a = client.echo("Hello".into()).await.unwrap();
     println!("{a}, world!")
